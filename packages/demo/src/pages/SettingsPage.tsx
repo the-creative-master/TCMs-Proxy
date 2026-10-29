@@ -1,5 +1,5 @@
 import { css, type Component } from "dreamland/core";
-import { controller, getTransport } from "..";
+import { controllerReady, getTransport } from "..";
 import {
 	AVAILABLE_TRANSPORTS,
 	type AvailableTransports,
@@ -53,7 +53,8 @@ const SettingsView: Component<
 			this.maxRequestsInput = String(nextMaxRequests);
 
 			if (wispChanged || transportChanged) {
-				controller.setTransport(getTransport());
+				const readyController = await controllerReady;
+				readyController.setTransport(getTransport());
 			}
 			this.status =
 				wispChanged || transportChanged

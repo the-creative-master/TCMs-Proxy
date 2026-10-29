@@ -1,6 +1,10 @@
 import { css, type Component } from "dreamland/core";
 import FlagEditor from "./components/FlagEditor";
-import BrowserView, { Omnibox, openProxyHome } from "./pages/BrowserView";
+import BrowserView, {
+	browserState,
+	Omnibox,
+	openProxyHome,
+} from "./pages/BrowserView";
 import RequestViewer, { requestsState } from "./pages/RequestViewer";
 import PlaygroundView from "./pages/Playground";
 import SettingsView from "./pages/SettingsPage";
@@ -109,8 +113,21 @@ const App: Component<{}, {}, { activeTab: ActiveTab }> = function () {
 
 				<div class="header-actions">
 					<div class="service-status">
-						<span class="status-dot" aria-hidden="true"></span>
-						<span>Proxy ready</span>
+						<span
+							class={use(browserState.proxyStatus).map(
+								(status) => `status-dot status-${status}`,
+							)}
+							aria-hidden="true"
+						></span>
+						<span>
+							{use(browserState.proxyStatus).map((status) =>
+								status === "ready"
+									? "Proxy ready"
+									: status === "offline"
+										? "Proxy unavailable"
+										: "Starting proxy…",
+							)}
+						</span>
 					</div>
 					<FlagEditor inline={true} />
 				</div>
@@ -374,6 +391,16 @@ App.style = css`
 		border-radius: 50%;
 		background: #6eb58a;
 		box-shadow: 0 0 0 3px rgb(110 181 138 / 12%);
+	}
+
+	.status-dot.status-starting {
+		background: #e7ab63;
+		box-shadow: 0 0 0 3px rgb(231 171 99 / 14%);
+	}
+
+	.status-dot.status-offline {
+		background: #d47568;
+		box-shadow: 0 0 0 3px rgb(212 117 104 / 14%);
 	}
 
 	.browser-toolbar {

@@ -1000,7 +1000,7 @@ const RequestViewer: Component<
 	};
 	const activeSignal = use(this.active ?? false, browserState.frame).map(
 		([active, frame]) => {
-			if (active) initPlugin(frame);
+			if (active && frame) initPlugin(frame);
 			return active;
 		}
 	);

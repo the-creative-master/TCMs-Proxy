@@ -1,7 +1,7 @@
 import { createStore, css, type Component } from "dreamland/core";
 import type { ScramjetFlags } from "@mercuryworkshop/scramjet";
 import { defaultConfigDev } from "@mercuryworkshop/scramjet";
-import { cachePlugin, controller } from "..";
+import { cachePlugin, controllerReady } from "..";
 
 const flagStore = createStore<ScramjetFlags>(
 	{
@@ -51,16 +51,22 @@ const FlagEditor: Component<
 	this.isOpen = false;
 	this.cacheBustStatus = "";
 
-	const toggleFlag = (flag: keyof ScramjetFlags, value: boolean) => {
+	const toggleFlag = async (flag: keyof ScramjetFlags, value: boolean) => {
 		flagStore[flag] = value;
-		Object.assign(controller.scramjetConfig.flags, flagStore);
+		const readyController = await controllerReady.catch(() => null);
+		if (readyController) {
+			Object.assign(readyController.scramjetConfig.flags, flagStore);
+		}
 	};
 
-	const resetToDefaults = () => {
+	const resetToDefaults = async () => {
 		Object.assign(flagStore, {
 			...defaultConfigDev.flags,
 		});
-		Object.assign(controller.scramjetConfig.flags, flagStore);
+		const readyController = await controllerReady.catch(() => null);
+		if (readyController) {
+			Object.assign(readyController.scramjetConfig.flags, flagStore);
+		}
 	};
 
 	const bustCache = async () => {
@@ -77,8 +83,10 @@ const FlagEditor: Component<
 		}, 2000);
 	};
 	cx.mount = async () => {
-		await controller.wait();
-		Object.assign(controller.scramjetConfig.flags, flagStore);
+		const readyController = await controllerReady.catch(() => null);
+		if (readyController) {
+			Object.assign(readyController.scramjetConfig.flags, flagStore);
+		}
 	};
 
 	return (

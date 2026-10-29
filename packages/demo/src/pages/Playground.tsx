@@ -8,7 +8,7 @@ import {
 	ScramjetHeaders,
 	type ScramjetFetchRequest,
 } from "@mercuryworkshop/scramjet";
-import { cachePlugin, controller } from "..";
+import { controllerReady } from "..";
 import Monaco from "../components/Monaco";
 
 const DEFAULT_ORIGIN = "https://fakeorigin.com";
@@ -230,8 +230,10 @@ const PlaygroundView: Component<
 	this.rewriteAsModule ??= false;
 
 	cx.mount = async () => {
-		await controller.wait();
-		this.frame = controller.createFrame();
+		const readyController = await controllerReady.catch(() => null);
+		if (!readyController) return;
+
+		this.frame = readyController.createFrame();
 
 		use(this.selectedFile, this.selectedProjectId).listen(() => {
 			const file = this.selectedFile;

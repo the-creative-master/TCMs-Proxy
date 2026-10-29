@@ -1,4 +1,3 @@
-import LoadInterstitial from "./components/LoadInterstitial";
 import App from "./App";
 import LibcurlClient from "@mercuryworkshop/libcurl-transport";
 import EpoxyClient from "@mercuryworkshop/epoxy-transport";
@@ -9,7 +8,18 @@ import { demoSettingsStore, getRuntimeWispUrl } from "./store";
 
 let app = document.getElementById("app")!;
 
-let controller: InstanceType<typeof Controller>;
+type ProxyController = InstanceType<typeof Controller>;
+let controller: ProxyController;
+let resolveControllerReady!: (value: ProxyController) => void;
+let rejectControllerReady!: (reason?: unknown) => void;
+
+/** Resolves when the proxy controller is usable, without blocking the app shell. */
+export const controllerReady = new Promise<ProxyController>((resolve, reject) => {
+	resolveControllerReady = resolve;
+	rejectControllerReady = reject;
+});
+void controllerReady.catch(() => {});
+
 const cachePlugin = new HttpCachePlugin();
 
 export function getTransport(): LibcurlClient | EpoxyClient {
@@ -44,90 +54,70 @@ async function waitForControllerOrReady(timeoutMs = 10000): Promise<void> {
 	await Promise.race([ready, controllerChanged, timeout]);
 }
 
-async function init() {
-	const interstitial: any = (
-		<LoadInterstitial status={"Loading"}></LoadInterstitial>
-	);
-	document.body.append(interstitial);
-	interstitial.showModal();
+async function waitForControllerInitialization(
+	proxyController: ProxyController,
+	timeoutMs = 20000
+): Promise<void> {
+	let timeoutId: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			proxyController.wait(),
+			new Promise<never>((_, reject) => {
+				timeoutId = setTimeout(
+					() => reject(new Error("Proxy controller initialization timed out.")),
+					timeoutMs
+				);
+			}),
+		]);
+	} finally {
+		if (timeoutId) clearTimeout(timeoutId);
+	}
+}
 
+async function init() {
 	try {
 		const registration = await navigator.serviceWorker.register("./sw.js");
+		await waitForControllerOrReady();
 
-		// Non-blocking progress updates on state transitions.
-		const updateStatus = (sw: ServiceWorker | null) => {
-			if (!sw) return;
-			const set = (msg: string) => (interstitial.$.state.status = msg);
-			const apply = () => {
-				switch (sw.state) {
-					case "installing":
-						set("Installing service worker...");
-						break;
-					case "installed":
-						set("Service worker installed, waiting to activate...");
-						break;
-					case "activating":
-						set("Activating service worker...");
-						break;
-					case "activated":
-						set("Service worker activated");
-						break;
-					case "redundant":
-						set("Service worker became redundant");
-						break;
-				}
-			};
-			apply();
-			sw.addEventListener("statechange", apply);
-		};
-
-		updateStatus(registration.installing ?? registration.waiting ?? null);
-
-		// Wait for control or readiness with a timeout; don't hang the UI on updates.
-		interstitial.$.state.status =
-			"Waiting for service worker to take control...";
-		await waitForControllerOrReady(10000);
-		interstitial.$.state.status =
-			"Service worker ready, waiting for controller init";
 		const readySw = navigator.serviceWorker.controller ?? registration.active;
 		if (!readySw) {
-			throw new Error("No service worker available for controller");
+			throw new Error("No service worker is available for the proxy.");
 		}
+
 		controller = new Controller({
 			serviceworker: readySw,
 			transport: getTransport(),
 			scramjetConfig: defaultConfigDev,
 		});
-		await controller.wait();
-		console.log(controller);
-		interstitial.$.state.status = "Controller initialized";
-		interstitial.close();
-	} catch (e) {
-		console.error("Error during service worker registration:", e);
-		// Always close the modal on error to prevent hanging UI.
-		try {
-			interstitial.close();
-		} catch {}
-		app.innerText =
-			"Failed to register service worker. Check console for details.";
+		await waitForControllerInitialization(controller);
+		console.log("TCMs Proxy controller initialized", controller);
+		resolveControllerReady(controller);
+	} catch (error) {
+		console.error("TCMs Proxy could not initialize the proxy controller:", error);
+		rejectControllerReady(error);
 	}
 }
 
-async function mount() {
+function mount() {
 	try {
 		const root = <App />;
 		app.replaceWith(root);
-	} catch (e) {
-		let err = e as any;
-		app.replaceWith(
-			document.createTextNode(
-				`Error mounting: ${"message" in err ? err.message : err}`
-			)
-		);
-		console.error(err);
-		throw e;
+		app = root as HTMLElement;
+	} catch (error) {
+		const errorScreen = document.createElement("main");
+		errorScreen.setAttribute("role", "alert");
+		errorScreen.style.cssText =
+			"min-height:100vh;display:grid;place-content:center;padding:2rem;background:#0d1217;color:#e8edf1;font:500 16px system-ui,sans-serif;text-align:center";
+		errorScreen.textContent =
+			"TCMs Proxy could not start. Refresh the page to try again.";
+		app.replaceWith(errorScreen);
+		console.error("TCMs Proxy failed to render:", error);
 	}
 }
 
-init().then(() => mount());
+// Render the branded interface immediately. Proxy startup happens in the
+// background, so a slow or unavailable service worker never leaves a blank page.
+mount();
+void init();
+
 export { controller, cachePlugin };

@@ -3,7 +3,7 @@ import {
 	CatchEscapedLinksPlugin,
 	UrlWatcherPlugin,
 } from "@mercuryworkshop/scramjet-utils";
-import { cachePlugin, controller } from "..";
+import { cachePlugin, controllerReady } from "..";
 import {
 	getSearchEngine,
 	getSearchUrl,
@@ -21,10 +21,13 @@ let homePageDataUrl = "";
 
 export const browserState = createState({
 	url: HOME_PAGE_LABEL,
-	frame: null! as Frame,
-	frameel: null! as HTMLIFrameElement,
+	frame: null as Frame | null,
+	frameel: null as HTMLIFrameElement | null,
 	isHome: true,
+	proxyStatus: "starting" as "starting" | "ready" | "offline",
 });
+
+let pendingNavigation: string | null = null;
 
 function resolveNavigationInput(value: string, engine: unknown): string | null {
 	const input = value.trim();
@@ -60,7 +63,12 @@ export function navigateToUrl(value: string): boolean {
 
 		browserState.isHome = false;
 		browserState.url = target.href;
-		browserState.frame?.go(target.href);
+		if (browserState.frame) {
+			pendingNavigation = null;
+			browserState.frame.go(target.href);
+		} else {
+			pendingNavigation = target.href;
+		}
 		return true;
 	} catch {
 		return false;
@@ -77,6 +85,7 @@ export function navigateFromInput(value: string): boolean {
 
 export function openProxyHome() {
 	if (!homePageDataUrl || !browserState.frameel) return;
+	pendingNavigation = null;
 	browserState.isHome = true;
 	browserState.url = HOME_PAGE_LABEL;
 	browserState.frameel.src = homePageDataUrl;
@@ -431,8 +440,11 @@ const BrowserView: Component<
 		frameel: HTMLIFrameElement;
 	}
 > = function (cx) {
-	cx.mount = async () => {
-		await controller.wait();
+	cx.mount = () => {
+		browserState.frameel = this.frameel;
+		homePageDataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(homepage)}`;
+		browserState.isHome = true;
+		browserState.url = HOME_PAGE_LABEL;
 
 		const handleHomeMessage = (event: MessageEvent) => {
 			if (
@@ -483,6 +495,9 @@ const BrowserView: Component<
 
 		window.addEventListener("message", handleHomeMessage);
 
+		this.frameel.addEventListener("load", syncHomePageState);
+		this.frameel.src = homePageDataUrl;
+
 		const urlWatcher = new UrlWatcherPlugin((url) => {
 			const isHomePage = url === homePageDataUrl;
 			browserState.isHome = isHomePage;
@@ -494,22 +509,30 @@ const BrowserView: Component<
 				new URL(`/?goto=${encodeURIComponent(url.href)}`, location.origin),
 		);
 
-		browserState.frameel = this.frameel;
-		browserState.frame = controller.createFrame(this.frameel, {
-			plugins: [cachePlugin, urlWatcher, catchEscapedLinks],
-		});
-
-		this.frameel.addEventListener("load", syncHomePageState);
-		homePageDataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(homepage)}`;
-		browserState.isHome = true;
-		browserState.url = HOME_PAGE_LABEL;
-		this.frameel.src = homePageDataUrl;
-
 		const goto = new URL(location.href).searchParams.get("goto");
 		if (goto) {
 			navigateToUrl(goto);
 			history.replaceState(null, "", location.href.split("?")[0]);
 		}
+
+		void controllerReady
+			.then((readyController) => {
+				const frame = readyController.createFrame(this.frameel, {
+					plugins: [cachePlugin, urlWatcher, catchEscapedLinks],
+				});
+				browserState.frame = frame;
+				browserState.proxyStatus = "ready";
+
+				if (pendingNavigation) {
+					const destination = pendingNavigation;
+					pendingNavigation = null;
+					frame.go(destination);
+				}
+			})
+			.catch((error) => {
+				browserState.proxyStatus = "offline";
+				console.error("TCMs Proxy browsing is unavailable:", error);
+			});
 	};
 
 	return (
