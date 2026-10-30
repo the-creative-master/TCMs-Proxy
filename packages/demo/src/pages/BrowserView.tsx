@@ -3,26 +3,36 @@ import {
   CatchEscapedLinksPlugin,
   UrlWatcherPlugin,
 } from "@mercuryworkshop/scramjet-utils";
-import { Tap, versionInfo } from "@mercuryworkshop/scramjet";
-import { cachePlugin, controller } from "..";
+import { Tap } from "@mercuryworkshop/scramjet";
+import { cachePlugin, controller, getTransport } from "..";
 import {
-  SEARCH_ENGINES,
+  AVAILABLE_TRANSPORTS,
+  demoSettingsDefaults,
   demoSettingsStore,
   getSearchEngine,
+  normalizeTransport,
+  normalizeWispUrl,
   resolveNavigationInput,
+  type AvailableTransports,
 } from "../store";
-import homepage from "./homepage.html?raw";
 import NewTab from "./NewTab";
 import type { Frame } from "@mercuryworkshop/scramjet-controller";
 
 export const browserState = createState({
+  /** what the omnibox shows */
   url: "",
+  /** the committed page, used for the "connection" label */
+  liveUrl: "",
   frame: null! as Frame,
   showHome: true,
   netError: "",
   netErrorUrl: "",
   netErrorHint: "",
 });
+
+const BLANK_DOC = `data:text/html;charset=utf-8,${encodeURIComponent(
+  "<!doctype html><meta charset=utf-8><style>html,body{margin:0;height:100%;background:#0a0b10}</style>",
+)}`;
 
 /**
  * Turn a transport failure into something a human can act on. The one that
@@ -41,7 +51,7 @@ function explainNetworkError(error: unknown) {
   if (/SSL connect error|error code 35|CURLE_SSL_CONNECT_ERROR/i.test(raw)) {
     return {
       problem: "TLS handshake blocked",
-      hint: "The connection to that host opened but the TLS handshake was refused. That is what a network allowlist or a TLS-inspecting middlebox looks like — the machine running the Wisp server cannot reach this site.",
+      hint: "The connection to that host opened but the TLS handshake was refused. That is what a network allowlist or TLS-inspecting middlebox looks like — the machine running the Wisp server cannot reach this site.",
     };
   }
   if (/Could not resolve|code 6|CURLE_COULDNT_RESOLVE/i.test(raw)) {
@@ -70,7 +80,8 @@ function watchRequestErrors(frame: Frame) {
     Tap.tap(frame.hooks.error.request, ({ rawrequest, error }) => {
       const { problem, hint } = explainNetworkError(error);
       browserState.netError = problem;
-      browserState.netErrorUrl = rawrequest?.remote ?? browserState.url;
+      browserState.netErrorUrl =
+        (rawrequest?.remote as string) ?? browserState.url;
       browserState.netErrorHint = hint;
     });
   } catch (error) {
@@ -78,7 +89,6 @@ function watchRequestErrors(frame: Frame) {
   }
 }
 
-/** send the browser frame to a url (search queries get resolved first) */
 export function navigateTo(url: string) {
   browserState.url = url;
   browserState.showHome = false;
@@ -98,242 +108,532 @@ export function navigateToInput(input: string) {
 
 export function goHome() {
   browserState.showHome = true;
+  browserState.netError = "";
+  browserState.netErrorHint = "";
 }
 
-export const Omnibox: Component<
+function prettyHost(url: string) {
+  try {
+    const parsed = new URL(url);
+    return parsed.host.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+const BrowserView: Component<
   {},
   {},
   {
-    inputEl: HTMLInputElement;
+    omniboxEl: HTMLInputElement;
+    frameel: HTMLIFrameElement;
+    connOpen: boolean;
+    wispInput: string;
+    transportInput: AvailableTransports;
+    connStatus: string;
+    connError: string;
   }
 > = function (cx) {
-  const submit = () => {
-    const value = this.inputEl?.value ?? browserState.url;
-    navigateToInput(value);
+  this.connOpen ??= false;
+  this.connStatus ??= "";
+  this.connError ??= "";
+
+  const openConnection = () => {
+    this.connOpen = !this.connOpen;
+    if (this.connOpen) {
+      this.wispInput = demoSettingsStore.wispUrl;
+      this.transportInput = demoSettingsStore.transport;
+      this.connStatus = "";
+      this.connError = "";
+    }
   };
 
-  const cycleEngine = () => {
-    const current = demoSettingsStore.searchEngine;
-    const index = SEARCH_ENGINES.findIndex((engine) => engine.id === current);
-    const next = SEARCH_ENGINES[(index + 1) % SEARCH_ENGINES.length];
-    demoSettingsStore.searchEngine = next.id;
+  const applyConnection = () => {
+    this.connError = "";
+    try {
+      const nextWisp = normalizeWispUrl(this.wispInput);
+      const nextTransport = normalizeTransport(this.transportInput);
+      const changed =
+        nextWisp !== demoSettingsStore.wispUrl ||
+        nextTransport !== demoSettingsStore.transport;
+
+      demoSettingsStore.wispUrl = nextWisp;
+      demoSettingsStore.transport = nextTransport;
+      this.wispInput = nextWisp;
+      this.transportInput = nextTransport;
+
+      if (changed) {
+        controller.setTransport(getTransport());
+        this.connStatus = "Reconnected — new requests use this server.";
+      } else {
+        this.connStatus = "No changes.";
+      }
+    } catch (error) {
+      this.connStatus = "";
+      this.connError =
+        error instanceof Error
+          ? error.message
+          : "Could not apply those settings.";
+    }
   };
 
-  cx.mount = () => {
-    const focusOmnibox = (event: KeyboardEvent) => {
+  cx.mount = async () => {
+    await controller.wait();
+
+    const urlWatcher = new UrlWatcherPlugin((url) => {
+      browserState.url = url;
+      browserState.liveUrl = url;
+      if (/^https?:/i.test(url)) browserState.showHome = false;
+    });
+    const catchEscapedLinks = new CatchEscapedLinksPlugin(
+      (url) =>
+        new URL(`/?goto=${encodeURIComponent(url.href)}`, location.origin),
+    );
+
+    this.frameel.src = BLANK_DOC;
+    browserState.frame = controller.createFrame(this.frameel, {
+      plugins: [cachePlugin, urlWatcher, catchEscapedLinks],
+    });
+    watchRequestErrors(browserState.frame);
+
+    const goto = new URL(location.href).searchParams.get("goto");
+    if (goto) {
+      navigateTo(goto);
+      history.replaceState(null, "", location.href.split("?")[0]);
+    }
+
+    const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "l") {
         event.preventDefault();
-        this.inputEl?.focus();
-        this.inputEl?.select();
+        this.omniboxEl?.focus();
+        this.omniboxEl?.select();
+      }
+      if (event.key === "Escape") {
+        this.connOpen = false;
       }
     };
-    document.addEventListener("keydown", focusOmnibox);
+    document.addEventListener("keydown", onKey);
   };
 
+  const submit = () => {
+    const value = this.omniboxEl?.value ?? browserState.url;
+    navigateToInput(value);
+    this.omniboxEl?.blur();
+  };
+
+  const engine = use(demoSettingsStore.searchEngine).map((id) =>
+    getSearchEngine(id),
+  );
+
   return (
-    <form
-      class="url-form"
-      on:submit={(e: SubmitEvent) => {
-        e.preventDefault();
-        submit();
-      }}
+    <div
+      class={use(browserState.showHome).map((home) =>
+        home ? "shell home" : "shell browsing",
+      )}
     >
-      <div class="browser-omnibox-shell">
-        <div class="omnibox-nav">
+      <div class="aurora" aria-hidden="true">
+        <span class="blob one"></span>
+        <span class="blob two"></span>
+        <span class="blob three"></span>
+      </div>
+
+      <header class="chrome">
+        <button
+          class="brand"
+          title="New tab"
+          on:click={() => {
+            goHome();
+            this.omniboxEl?.focus();
+          }}
+        >
+          <span class="brand-mark">TCM</span>
+        </button>
+
+        <div class="nav">
           <button
-            type="button"
-            class="nav-btn"
+            class="icon-btn"
             title="Back"
             on:click={() => browserState.frame?.back()}
           >
             <span class="material-symbols-outlined">arrow_back</span>
           </button>
           <button
-            type="button"
-            class="nav-btn"
+            class="icon-btn"
             title="Forward"
             on:click={() => browserState.frame?.forward()}
           >
             <span class="material-symbols-outlined">arrow_forward</span>
           </button>
           <button
-            type="button"
-            class="nav-btn"
+            class="icon-btn"
             title="Reload"
             on:click={() => browserState.frame?.reload()}
           >
             <span class="material-symbols-outlined">refresh</span>
           </button>
-          <button
-            type="button"
-            class="nav-btn"
-            title="Home"
-            on:click={() => goHome()}
-          >
-            <span class="material-symbols-outlined">home</span>
-          </button>
         </div>
 
-        <div class="omnibox-input-wrap">
-          <input
-            id="search"
-            class="url-input"
-            type="text"
-            spellcheck="false"
-            autocomplete="off"
-            this={use(this.inputEl)}
-            value={use(browserState.url)}
-            placeholder="Search or enter address"
-          />
-        </div>
-
-        <button
-          type="button"
-          class="engine-switch"
-          title="Click to switch search engine"
-          on:click={(e: MouseEvent) => {
+        <form
+          class="omni"
+          on:submit={(e: SubmitEvent) => {
             e.preventDefault();
-            cycleEngine();
+            submit();
           }}
         >
           <span
-            class={use(demoSettingsStore.searchEngine).map(
-              (id) => `engine-switch-dot engine-${id}`,
-            )}
-          ></span>
-          <span class="engine-switch-label">
-            {use(demoSettingsStore.searchEngine).map(
-              (id) => getSearchEngine(id).label,
-            )}
+            class={engine.map((e) => `omni-engine engine-${e.id}`)}
+            title="Search engine"
+          >
+            {engine.map((e) => e.glyph)}
           </span>
-        </button>
+          <input
+            id="search"
+            class="omni-input"
+            type="text"
+            spellcheck={false}
+            autocomplete="off"
+            this={use(this.omniboxEl)}
+            placeholder={engine.map(
+              (e) => `Search ${e.label} or enter address`,
+            )}
+          />
+          {use(browserState.showHome).map((home) =>
+            home ? null : (
+              <button
+                type="button"
+                class="omni-site"
+                title="Back to new tab"
+                on:click={() => goHome()}
+              >
+                {use(browserState.liveUrl).map((url) =>
+                  url ? prettyHost(url) : "",
+                )}
+              </button>
+            ),
+          )}
+        </form>
 
-        <button type="submit" class="go-btn" title="Go">
-          <span class="material-symbols-outlined">arrow_forward</span>
-        </button>
-      </div>
-    </form>
+        <div class="chrome-actions">
+          <button
+            class={use(this.connOpen).map((open) =>
+              open ? "icon-btn connection active" : "icon-btn connection",
+            )}
+            title="Connection"
+            on:click={openConnection}
+          >
+            <span class="dot"></span>
+          </button>
+        </div>
+
+        {use(this.connOpen).andThen(
+          <div class="popover">
+            <div class="popover-head">
+              <span>Connection</span>
+              <button
+                class="popover-close"
+                on:click={() => {
+                  this.connOpen = false;
+                }}
+              >
+                <span class="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <label class="popover-field">
+              <span>Wisp server</span>
+              <input
+                type="text"
+                spellcheck={false}
+                value={use(this.wispInput)}
+                on:input={(e: InputEvent) => {
+                  this.wispInput = (e.target as HTMLInputElement).value;
+                }}
+                on:keydown={(e: KeyboardEvent) => {
+                  if (e.key === "Enter") applyConnection();
+                }}
+              />
+            </label>
+            <label class="popover-field">
+              <span>Transport</span>
+              <select
+                value={use(this.transportInput)}
+                on:change={(e: Event) => {
+                  this.transportInput = (e.target as HTMLSelectElement)
+                    .value as AvailableTransports;
+                }}
+              >
+                {AVAILABLE_TRANSPORTS.map((option) => (
+                  <option value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <p class="popover-note">
+              Every proxied request leaves from the machine running this Wisp
+              server, not from your browser.
+            </p>
+            {use(this.connError).andThen(
+              <div class="popover-error">{use(this.connError)}</div>,
+            )}
+            {use(this.connStatus).andThen(
+              <div class="popover-status">{use(this.connStatus)}</div>,
+            )}
+            <div class="popover-actions">
+              <button
+                class="ghost"
+                on:click={() => {
+                  this.wispInput = demoSettingsDefaults.wispUrl;
+                  this.transportInput = demoSettingsDefaults.transport;
+                }}
+              >
+                Defaults
+              </button>
+              <button class="primary" on:click={applyConnection}>
+                Apply
+              </button>
+            </div>
+          </div>,
+        )}
+      </header>
+
+      <main class="viewport">
+        <iframe this={use(this.frameel)} class="site-frame"></iframe>
+
+        {use(browserState.netError).map((error) =>
+          error ? (
+            <div class="net-error">
+              <div class="net-error-body">
+                <div class="net-error-title">
+                  <span class="net-error-dot"></span>
+                  Can&rsquo;t reach{" "}
+                  <span class="net-error-url">
+                    {use(browserState.netErrorUrl)}
+                  </span>
+                </div>
+                <div class="net-error-problem">{error}</div>
+                {use(browserState.netErrorHint).map((hint) =>
+                  hint ? <div class="net-error-hint">{hint}</div> : null,
+                )}
+              </div>
+              <div class="net-error-actions">
+                <button
+                  on:click={() => {
+                    browserState.netError = "";
+                    browserState.frame?.reload();
+                  }}
+                >
+                  Retry
+                </button>
+                <button
+                  class="ghost"
+                  on:click={() => {
+                    browserState.netError = "";
+                    browserState.netErrorHint = "";
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ) : null,
+        )}
+      </main>
+
+      {use(browserState.showHome).andThen(
+        <NewTab
+          onNavigate={(url: string) => {
+            navigateTo(url);
+          }}
+        />,
+      )}
+    </div>
   );
 };
 
-Omnibox.style = css`
+BrowserView.style = css`
+  @import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0");
+
   :scope {
-    display: flex;
-    align-items: center;
-    padding: 7px 9px;
-    background: rgba(12, 14, 22, 0.92);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    min-width: 0;
-    width: 100%;
-    box-sizing: border-box;
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background: #080910;
+    color: #e9ebf5;
     font-family:
       "Inter",
       system-ui,
       -apple-system,
       "Segoe UI",
       sans-serif;
+    box-sizing: border-box;
   }
-  .browser-omnibox-shell {
+  :scope * {
+    box-sizing: border-box;
+  }
+  .material-symbols-outlined {
+    font-family: "Material Symbols Outlined";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 18px;
+    line-height: 1;
+    display: inline-block;
+    white-space: nowrap;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .aurora {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .blob {
+    position: absolute;
+    display: block;
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.5;
+  }
+  .blob.one {
+    width: 46vw;
+    height: 46vw;
+    left: -10vw;
+    top: -16vw;
+    background: radial-gradient(circle, #6d4bff, transparent 70%);
+    animation: drift 26s ease-in-out infinite alternate;
+  }
+  .blob.two {
+    width: 40vw;
+    height: 40vw;
+    right: -12vw;
+    top: -10vw;
+    background: radial-gradient(circle, #1fb6d6, transparent 70%);
+    animation: drift 32s ease-in-out infinite alternate-reverse;
+  }
+  .blob.three {
+    width: 38vw;
+    height: 38vw;
+    left: 30vw;
+    bottom: -22vw;
+    background: radial-gradient(circle, #ff5d8f, transparent 70%);
+    opacity: 0.28;
+    animation: drift 38s ease-in-out infinite alternate;
+  }
+  @keyframes drift {
+    from {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    to {
+      transform: translate3d(4vw, 3vw, 0) scale(1.12);
+    }
+  }
+
+  .chrome {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    height: 54px;
+    z-index: 20;
     display: flex;
-    width: 100%;
     align-items: center;
-    gap: 6px;
-    min-width: 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.04);
-    padding: 3px 4px 3px 6px;
-    border-radius: 13px;
-    flex: 1;
-    transition:
-      border-color 0.14s ease,
-      box-shadow 0.14s ease;
+    gap: 8px;
+    padding: 0 8px 0 8px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: linear-gradient(
+      180deg,
+      rgba(28, 31, 48, 0.86),
+      rgba(14, 16, 26, 0.9)
+    );
+    backdrop-filter: blur(20px) saturate(160%);
+    box-shadow:
+      0 18px 44px rgba(0, 0, 0, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
-  .browser-omnibox-shell:focus-within {
-    border-color: rgba(124, 92, 255, 0.55);
-    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.14);
+  .brand {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border: 0;
+    padding: 0;
+    border-radius: 11px;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, #7c5cff, #22d3ee);
+    box-shadow:
+      0 10px 24px rgba(96, 92, 255, 0.34),
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
   }
-  .omnibox-nav {
+  .brand-mark {
+    font-size: 0.56rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    color: #fff;
+  }
+  .nav {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 1px;
-    padding-right: 5px;
-    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    padding-right: 6px;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
   }
-  .nav-btn {
+  .icon-btn {
+    width: 30px;
+    height: 30px;
     border: 0;
-    background: transparent;
-    color: #939bb1;
-    width: 26px;
-    height: 26px;
     padding: 0;
-    border-radius: 8px;
+    border-radius: 9px;
+    background: transparent;
+    color: #98a0b8;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     transition:
-      background 0.12s ease,
-      color 0.12s ease;
+      background 0.13s ease,
+      color 0.13s ease;
   }
-  .nav-btn:hover {
+  .icon-btn:hover {
     background: rgba(255, 255, 255, 0.09);
-    color: #eef0f8;
+    color: #f1f3fa;
   }
-  .browser-omnibox-shell .material-symbols-outlined {
-    font-size: 15px !important;
-    line-height: 1 !important;
-    font-variation-settings:
-      "OPSZ" 20,
-      "wght" 300,
-      "FILL" 0,
-      "GRAD" 0;
+  .icon-btn .material-symbols-outlined {
+    font-size: 17px;
   }
-  .omnibox-input-wrap {
+
+  .omni {
     flex: 1;
     min-width: 0;
     display: flex;
-  }
-  .url-input {
-    box-sizing: border-box;
-    width: 100%;
-    padding: 6px 6px;
-    font-size: 0.86rem;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: #eef0f8;
-    outline: none;
-    font-family: inherit;
-  }
-  .url-input::placeholder {
-    color: #737b91;
-  }
-  .engine-switch {
-    flex: none;
-    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.05);
-    color: #b9c0d4;
-    font: inherit;
-    font-size: 0.72rem;
-    font-weight: 560;
-    padding: 4px 9px;
-    border-radius: 9px;
-    cursor: pointer;
+    gap: 8px;
+    height: 38px;
+    padding: 0 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(8, 10, 18, 0.55);
     transition:
-      background 0.12s ease,
-      color 0.12s ease;
+      border-color 0.14s ease,
+      box-shadow 0.14s ease,
+      background 0.14s ease;
   }
-  .engine-switch:hover {
-    background: rgba(124, 92, 255, 0.18);
-    color: #eae7ff;
+  .omni:focus-within {
+    border-color: rgba(124, 92, 255, 0.65);
+    background: rgba(8, 10, 18, 0.78);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.16);
   }
-  .engine-switch-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+  .omni-engine {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 7px;
+    display: grid;
+    place-items: center;
+    font-size: 0.66rem;
+    font-weight: 800;
+    color: #fff;
   }
   .engine-google {
     background: #4285f4;
@@ -347,170 +647,217 @@ Omnibox.style = css`
   .engine-brave {
     background: #fb542b;
   }
-  .go-btn {
-    flex: none;
-    width: 28px;
-    height: 28px;
+  .omni-input {
+    flex: 1;
+    min-width: 0;
     border: 0;
-    border-radius: 9px;
+    background: transparent;
+    color: #f2f4fb;
+    font: inherit;
+    font-size: 0.86rem;
+    outline: none;
+    padding: 0;
+  }
+  .omni-input::placeholder {
+    color: #737b91;
+  }
+  .omni-site {
+    flex: none;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border: 0;
+    cursor: pointer;
+    padding: 4px 9px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #b9c0d4;
+    font: inherit;
+    font-size: 0.72rem;
+  }
+  .omni-site:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #eef0f8;
+  }
+
+  .chrome-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .icon-btn.connection {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .icon-btn.connection .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+  }
+  .icon-btn.connection.active {
+    background: rgba(124, 92, 255, 0.22);
+    border-color: rgba(124, 92, 255, 0.45);
+  }
+
+  .popover {
+    position: absolute;
+    top: 56px;
+    right: 0;
+    width: 320px;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(16, 18, 30, 0.98);
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.6);
+    animation: pop-in 0.14s ease-out;
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .popover-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    font-weight: 650;
+  }
+  .popover-close {
+    border: 0;
+    background: transparent;
+    color: #8b93a9;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 6px;
     display: grid;
     place-items: center;
-    cursor: pointer;
-    color: #fff;
-    background: linear-gradient(135deg, #7c5cff, #4f8bff);
-    box-shadow: 0 6px 16px rgba(96, 92, 255, 0.3);
   }
-  .go-btn .material-symbols-outlined {
-    font-size: 15px !important;
-    color: #fff;
+  .popover-close:hover {
+    color: #e9ebf5;
+    background: rgba(255, 255, 255, 0.08);
   }
-  @media (max-width: 600px) {
-    .engine-switch-label {
-      display: none;
-    }
-  }
-`;
-
-const BrowserView: Component<
-  {
-    active: boolean;
-  },
-  {},
-  {
-    frameel: HTMLIFrameElement;
-  }
-> = function (cx) {
-  cx.mount = async () => {
-    await controller.wait();
-
-    let urlWatcher = new UrlWatcherPlugin((url) => {
-      browserState.url = url;
-      if (/^https?:/i.test(url)) browserState.showHome = false;
-    });
-    let catchEscapedLinks = new CatchEscapedLinksPlugin(
-      (url) =>
-        new URL(`/?goto=${encodeURIComponent(url.href)}`, location.origin),
-    );
-    browserState.frame = controller.createFrame(this.frameel, {
-      plugins: [cachePlugin, urlWatcher, catchEscapedLinks],
-    });
-    watchRequestErrors(browserState.frame);
-    let realHomepage = homepage;
-    realHomepage = realHomepage.replaceAll(
-      "{{SCRAMJET_VERSION}}",
-      String(versionInfo.version),
-    );
-    realHomepage = realHomepage.replaceAll(
-      "{{SCRAMJET_BUILD}}",
-      String(versionInfo.build),
-    );
-    realHomepage = realHomepage.replaceAll(
-      "{{SCRAMJET_DATE_PRETTY}}",
-      new Date(versionInfo.date).toLocaleString(undefined, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }),
-    );
-    this.frameel.src = `data:text/html;base64,${btoa(realHomepage)}`;
-
-    let goto = new URL(location.href).searchParams.get("goto");
-    if (goto) {
-      navigateTo(goto);
-      history.replaceState(null, "", location.href.split("?")[0]);
-    }
-  };
-
-  return (
-    <div
-      class={use(this.active).map(
-        (active) => `tab-panel browser-view ${active ? "active" : ""}`,
-      )}
-    >
-      <iframe
-        this={use(this.frameel)}
-        class={use(browserState.showHome).map((home) =>
-          home ? "site-frame hidden" : "site-frame",
-        )}
-      ></iframe>
-      {use(browserState.showHome).andThen(
-        <NewTab
-          onNavigate={(url: string) => {
-            navigateTo(url);
-          }}
-        />,
-      )}
-      {use(browserState.netError).map((error) =>
-        error ? (
-          <div class="net-error">
-            <div class="net-error-body">
-              <div class="net-error-title">
-                <span class="net-error-dot"></span>
-                Can&rsquo;t reach{" "}
-                <span class="net-error-url">
-                  {use(browserState.netErrorUrl)}
-                </span>
-              </div>
-              <div class="net-error-problem">{error}</div>
-              {use(browserState.netErrorHint).map((hint) =>
-                hint ? <div class="net-error-hint">{hint}</div> : null,
-              )}
-            </div>
-            <div class="net-error-actions">
-              <button
-                on:click={() => {
-                  browserState.netError = "";
-                  browserState.frame?.reload();
-                }}
-              >
-                Retry
-              </button>
-              <button
-                class="ghost"
-                on:click={() => {
-                  browserState.netError = "";
-                  browserState.netErrorHint = "";
-                }}
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        ) : null,
-      )}
-    </div>
-  );
-};
-
-BrowserView.style = css`
-  :scope {
-    flex: 1;
-    width: 100%;
-    min-width: 0;
-    min-height: 0;
-    display: none;
-    flex-direction: column;
-    position: relative;
-    background: #07080e;
-  }
-  :scope.active {
+  .popover-field {
     display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 0.72rem;
+    color: #9aa3b8;
+  }
+  .popover-field input,
+  .popover-field select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(8, 10, 18, 0.7);
+    color: #f1f3fa;
+    font: inherit;
+    font-size: 0.78rem;
+    outline: none;
+  }
+  .popover-field input:focus,
+  .popover-field select:focus {
+    border-color: rgba(124, 92, 255, 0.65);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.14);
+  }
+  .popover-note {
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: #7d859b;
+  }
+  .popover-error,
+  .popover-status {
+    font-size: 0.74rem;
+    padding: 7px 9px;
+    border-radius: 8px;
+  }
+  .popover-error {
+    color: #ffb4b4;
+    background: rgba(255, 90, 90, 0.1);
+    border: 1px solid rgba(255, 90, 90, 0.28);
+  }
+  .popover-status {
+    color: #b6f0d3;
+    background: rgba(52, 211, 153, 0.1);
+    border: 1px solid rgba(52, 211, 153, 0.25);
+  }
+  .popover-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .popover-actions button {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: #e9ebf5;
+    border-radius: 9px;
+    padding: 7px 12px;
+    font: inherit;
+    font-size: 0.76rem;
+    font-weight: 560;
+    cursor: pointer;
+  }
+  .popover-actions button:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .popover-actions button.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: #9aa3b8;
+  }
+  .popover-actions button.primary {
+    border-color: transparent;
+    background: linear-gradient(135deg, #7c5cff, #4f8bff);
+    color: #fff;
   }
 
-  iframe.site-frame {
-    background: white;
-    flex: 1;
-    border: none;
-    width: 100%;
-    min-height: 0;
+  .viewport {
+    position: absolute;
+    top: 78px;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: #0b0d14;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+    z-index: 5;
   }
-  iframe.site-frame.hidden {
-    visibility: hidden;
+  :scope.home .viewport {
+    opacity: 0;
+    pointer-events: none;
+  }
+  iframe.site-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: #fff;
   }
 
   .net-error {
     position: absolute;
     left: 50%;
-    bottom: 22px;
+    bottom: 20px;
     transform: translateX(-50%);
     width: min(620px, calc(100% - 32px));
     display: flex;
@@ -527,12 +874,6 @@ BrowserView.style = css`
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
     color: #f4e9ec;
     z-index: 5;
-    font-family:
-      "Inter",
-      system-ui,
-      -apple-system,
-      "Segoe UI",
-      sans-serif;
     animation: net-in 0.16s ease-out;
   }
   @keyframes net-in {
@@ -608,6 +949,19 @@ BrowserView.style = css`
     background: transparent;
     border-color: transparent;
     color: #a89aa0;
+  }
+
+  @media (max-width: 620px) {
+    .nav {
+      display: none;
+    }
+    .omni-site {
+      display: none;
+    }
+    .popover {
+      width: calc(100vw - 40px);
+      right: -4px;
+    }
   }
 `;
 

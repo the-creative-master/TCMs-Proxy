@@ -3,11 +3,11 @@ import { createStore } from "dreamland/core";
 export type AvailableTransports = "libcurl" | "epoxy";
 
 export const AVAILABLE_TRANSPORTS: ReadonlyArray<{
-	value: AvailableTransports;
-	label: string;
+  value: AvailableTransports;
+  label: string;
 }> = [
-	{ value: "libcurl", label: "Libcurl" },
-	{ value: "epoxy", label: "Epoxy" },
+  { value: "libcurl", label: "Libcurl" },
+  { value: "epoxy", label: "Epoxy" },
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -17,81 +17,81 @@ export const AVAILABLE_TRANSPORTS: ReadonlyArray<{
 export type SearchEngineId = "google" | "bing" | "duckduckgo" | "brave";
 
 export type SearchEngine = {
-	id: SearchEngineId;
-	label: string;
-	glyph: string;
-	color: string;
-	searchUrl: string;
-	hint: string;
+  id: SearchEngineId;
+  label: string;
+  glyph: string;
+  color: string;
+  searchUrl: string;
+  hint: string;
 };
 
 export const SEARCH_ENGINES: ReadonlyArray<SearchEngine> = [
-	{
-		id: "google",
-		label: "Google",
-		glyph: "G",
-		color: "#4285f4",
-		searchUrl: "https://www.google.com/search?q=",
-		hint: "The classic",
-	},
-	{
-		id: "bing",
-		label: "Bing",
-		glyph: "b",
-		color: "#00a4ef",
-		searchUrl: "https://www.bing.com/search?q=",
-		hint: "Microsoft",
-	},
-	{
-		id: "duckduckgo",
-		label: "DuckDuckGo",
-		glyph: "D",
-		color: "#de5833",
-		searchUrl: "https://duckduckgo.com/?q=",
-		hint: "Private",
-	},
-	{
-		id: "brave",
-		label: "Brave",
-		glyph: "B",
-		color: "#fb542b",
-		searchUrl: "https://search.brave.com/search?q=",
-		hint: "Independent",
-	},
+  {
+    id: "google",
+    label: "Google",
+    glyph: "G",
+    color: "#4285f4",
+    searchUrl: "https://www.google.com/search?q=",
+    hint: "The classic",
+  },
+  {
+    id: "bing",
+    label: "Bing",
+    glyph: "b",
+    color: "#00a4ef",
+    searchUrl: "https://www.bing.com/search?q=",
+    hint: "Microsoft",
+  },
+  {
+    id: "duckduckgo",
+    label: "DuckDuckGo",
+    glyph: "D",
+    color: "#de5833",
+    searchUrl: "https://duckduckgo.com/?q=",
+    hint: "Private",
+  },
+  {
+    id: "brave",
+    label: "Brave",
+    glyph: "B",
+    color: "#fb542b",
+    searchUrl: "https://search.brave.com/search?q=",
+    hint: "Independent",
+  },
 ];
 
 export const DEFAULT_SEARCH_ENGINE: SearchEngineId = "google";
 
 export function getSearchEngine(id: string): SearchEngine {
-	return SEARCH_ENGINES.find((engine) => engine.id === id) ?? SEARCH_ENGINES[0];
+  return SEARCH_ENGINES.find((engine) => engine.id === id) ?? SEARCH_ENGINES[0];
 }
 
 export function normalizeSearchEngine(value: string): SearchEngineId {
-	const engine = SEARCH_ENGINES.find((candidate) => candidate.id === value);
-	if (!engine) {
-		throw new TypeError(`Unknown search engine: ${value}`);
-	}
-	return engine.id;
+  const engine = SEARCH_ENGINES.find((candidate) => candidate.id === value);
+  if (!engine) {
+    throw new TypeError(`Unknown search engine: ${value}`);
+  }
+  return engine.id;
 }
 
 export function buildSearchUrl(engine: SearchEngineId, query: string) {
-	return getSearchEngine(engine).searchUrl + encodeURIComponent(query.trim());
+  return getSearchEngine(engine).searchUrl + encodeURIComponent(query.trim());
 }
 
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}(:\d+)?([/?#].*)?$/;
 const DOMAIN_RE =
-	/^[\w-]+(\.[\w-]+)+(:\d+)?([/?#].*)?$|^localhost(:\d+)?([/?#].*)?$/i;
+  /^[\w-]+(\.[\w-]+)+(:\d+)?([/?#].*)?$|^localhost(:\d+)?([/?#].*)?$/i;
 
 /** Best-effort guess: is this omnibox input a URL rather than a search query? */
 export function looksLikeUrl(input: string) {
-	const value = input.trim();
-	if (!value || /\s/.test(value)) return false;
-	if (SCHEME_RE.test(value)) return true;
-	if (IPV4_RE.test(value)) return true;
-	// require a plausible tld so "3.14" or "hello" stay searches
-	if (DOMAIN_RE.test(value) && /\.[a-z]{2,}/i.test(value)) return true;
-	return false;
+  const value = input.trim();
+  if (!value || /\s/.test(value)) return false;
+  if (SCHEME_RE.test(value)) return true;
+  if (IPV4_RE.test(value)) return true;
+  // require a plausible tld so "3.14" or "hello" stay searches
+  if (DOMAIN_RE.test(value) && /\.[a-z]{2,}/i.test(value)) return true;
+  return false;
 }
 
 /**
@@ -99,18 +99,18 @@ export function looksLikeUrl(input: string) {
  * Text -> search on the currently selected engine, hosts -> https URL.
  */
 export function resolveNavigationInput(
-	input: string,
-	engine: SearchEngineId
+  input: string,
+  engine: SearchEngineId,
 ): string | null {
-	const value = input.trim();
-	if (!value) return null;
+  const value = input.trim();
+  if (!value) return null;
 
-	if (!looksLikeUrl(value)) {
-		return buildSearchUrl(engine, value);
-	}
+  if (!looksLikeUrl(value)) {
+    return buildSearchUrl(engine, value);
+  }
 
-	if (SCHEME_RE.test(value)) return value;
-	return `https://${value}`;
+  if (SCHEME_RE.test(value)) return value;
+  return `https://${value}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -118,118 +118,116 @@ export function resolveNavigationInput(
 /* -------------------------------------------------------------------------- */
 
 export type Shortcut = {
-	id: string;
-	name: string;
-	url: string;
+  id: string;
+  name: string;
+  url: string;
 };
 
 function shortcut(id: string, name: string, url: string): Shortcut {
-	return { id, name, url };
+  return { id, name, url };
 }
 
 export const DEFAULT_SHORTCUTS: ReadonlyArray<Shortcut> = [
-	shortcut("youtube", "YouTube", "https://www.youtube.com"),
-	shortcut("wikipedia", "Wikipedia", "https://www.wikipedia.org"),
-	shortcut("reddit", "Reddit", "https://www.reddit.com"),
-	shortcut("github", "GitHub", "https://github.com"),
-	shortcut("discord", "Discord", "https://discord.com/app"),
-	shortcut("chatgpt", "ChatGPT", "https://chatgpt.com"),
+  shortcut("youtube", "YouTube", "https://www.youtube.com"),
+  shortcut("wikipedia", "Wikipedia", "https://www.wikipedia.org"),
+  shortcut("reddit", "Reddit", "https://www.reddit.com"),
+  shortcut("github", "GitHub", "https://github.com"),
+  shortcut("discord", "Discord", "https://discord.com/app"),
+  shortcut("chatgpt", "ChatGPT", "https://chatgpt.com"),
 ];
 
 export const shortcutsStore = createStore(
-	{
-		items: DEFAULT_SHORTCUTS.map((item) => ({ ...item })) as Shortcut[],
-	},
-	{
-		ident: "tcm-shortcuts",
-		backing: "localstorage",
-		autosave: "auto",
-	}
+  {
+    items: DEFAULT_SHORTCUTS.map((item) => ({ ...item })) as Shortcut[],
+  },
+  {
+    ident: "tcm-shortcuts",
+    backing: "localstorage",
+    autosave: "auto",
+  },
 );
 
 // the store is restored from localStorage merge, so make sure `items` is sane
 if (!Array.isArray(shortcutsStore.items)) {
-	shortcutsStore.items = DEFAULT_SHORTCUTS.map((item) => ({ ...item }));
+  shortcutsStore.items = DEFAULT_SHORTCUTS.map((item) => ({ ...item }));
 }
 
 function newShortcutId() {
-	return `sc-${Date.now().toString(36)}-${Math.random()
-		.toString(36)
-		.slice(2, 7)}`;
+  return `sc-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
 }
 
 export function normalizeShortcutUrl(value: string) {
-	const trimmed = value.trim();
-	if (!trimmed) {
-		throw new TypeError("A URL is required.");
-	}
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new TypeError("A URL is required.");
+  }
 
-	const withScheme = SCHEME_RE.test(trimmed) ? trimmed : `https://${trimmed}`;
-	let parsed: URL;
-	try {
-		parsed = new URL(withScheme);
-	} catch {
-		throw new TypeError("That doesn't look like a valid URL.");
-	}
-	if (!/^https?:$/.test(parsed.protocol)) {
-		throw new TypeError("Shortcuts must use http or https.");
-	}
-	return parsed.toString();
+  const withScheme = SCHEME_RE.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(withScheme);
+  } catch {
+    throw new TypeError("That doesn't look like a valid URL.");
+  }
+  if (!/^https?:$/.test(parsed.protocol)) {
+    throw new TypeError("Shortcuts must use http or https.");
+  }
+  return parsed.toString();
 }
 
 export function shortcutNameFromUrl(url: string) {
-	try {
-		const host = new URL(url).hostname.replace(/^www\./, "");
-		const label = host.split(".")[0] ?? host;
-		return label.charAt(0).toUpperCase() + label.slice(1);
-	} catch {
-		return "Shortcut";
-	}
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const label = host.split(".")[0] ?? host;
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  } catch {
+    return "Shortcut";
+  }
 }
 
 export function addShortcut(name: string, url: string): Shortcut {
-	const item: Shortcut = {
-		id: newShortcutId(),
-		name: name.trim() || shortcutNameFromUrl(url),
-		url,
-	};
-	shortcutsStore.items = [...shortcutsStore.items, item];
-	return item;
+  const item: Shortcut = {
+    id: newShortcutId(),
+    name: name.trim() || shortcutNameFromUrl(url),
+    url,
+  };
+  shortcutsStore.items = [...shortcutsStore.items, item];
+  return item;
 }
 
 export function updateShortcut(id: string, name: string, url: string) {
-	shortcutsStore.items = shortcutsStore.items.map((item) =>
-		item.id === id
-			? { ...item, name: name.trim() || shortcutNameFromUrl(url), url }
-			: item
-	);
+  shortcutsStore.items = shortcutsStore.items.map((item) =>
+    item.id === id
+      ? { ...item, name: name.trim() || shortcutNameFromUrl(url), url }
+      : item,
+  );
 }
 
 export function removeShortcut(id: string) {
-	shortcutsStore.items = shortcutsStore.items.filter(
-		(item) => item.id !== id
-	);
+  shortcutsStore.items = shortcutsStore.items.filter((item) => item.id !== id);
 }
 
 export function resetShortcuts() {
-	shortcutsStore.items = DEFAULT_SHORTCUTS.map((item) => ({ ...item }));
+  shortcutsStore.items = DEFAULT_SHORTCUTS.map((item) => ({ ...item }));
 }
 
 /** deterministic pretty gradient for a shortcut tile */
 export function shortcutTileColor(seed: string) {
-	let hash = 0;
-	for (let i = 0; i < seed.length; i++) {
-		hash = (hash * 31 + seed.charCodeAt(i)) % 360;
-	}
-	const hue = hash;
-	return `linear-gradient(140deg, hsl(${hue} 68% 56%), hsl(${
-		(hue + 42) % 360
-	} 72% 42%))`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 360;
+  }
+  const hue = hash;
+  return `linear-gradient(140deg, hsl(${hue} 68% 56%), hsl(${
+    (hue + 42) % 360
+  } 72% 42%))`;
 }
 
 export function monogram(name: string) {
-	const trimmed = name.trim();
-	return (trimmed ? trimmed[0] : "?").toUpperCase();
+  const trimmed = name.trim();
+  return (trimmed ? trimmed[0] : "?").toUpperCase();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -237,36 +235,32 @@ export function monogram(name: string) {
 /* -------------------------------------------------------------------------- */
 
 function runtimeDefaultWispUrl() {
-	const fromEnv = import.meta.env.VITE_WISP_URL as string | undefined;
-	if (fromEnv) return fromEnv;
+  const fromEnv = import.meta.env.VITE_WISP_URL as string | undefined;
+  if (fromEnv) return fromEnv;
 
-	const isSecure =
-		typeof location !== "undefined" && location.protocol === "https:";
-	const host =
-		typeof location !== "undefined" && location.host
-			? location.host
-			: "localhost:4141";
-	return `${isSecure ? "wss:" : "ws:"}//${host}/wisp/`;
+  const isSecure =
+    typeof location !== "undefined" && location.protocol === "https:";
+  const host =
+    typeof location !== "undefined" && location.host
+      ? location.host
+      : "localhost:4141";
+  return `${isSecure ? "wss:" : "ws:"}//${host}/wisp/`;
 }
 
 const DEFAULT_WISP_URL = runtimeDefaultWispUrl();
 const DEFAULT_TRANSPORT: AvailableTransports = "libcurl";
-const DEFAULT_HOME_URL = "https://www.google.com";
-const DEFAULT_MAX_REQUESTS = 200;
 
 export const demoSettingsStore = createStore(
-	{
-		transport: DEFAULT_TRANSPORT as AvailableTransports,
-		wispUrl: DEFAULT_WISP_URL,
-		homeUrl: DEFAULT_HOME_URL,
-		maxRequests: DEFAULT_MAX_REQUESTS,
-		searchEngine: DEFAULT_SEARCH_ENGINE as SearchEngineId,
-	},
-	{
-		ident: "scramjet-demo-settings",
-		backing: "localstorage",
-		autosave: "auto",
-	}
+  {
+    transport: DEFAULT_TRANSPORT as AvailableTransports,
+    wispUrl: DEFAULT_WISP_URL,
+    searchEngine: DEFAULT_SEARCH_ENGINE as SearchEngineId,
+  },
+  {
+    ident: "scramjet-demo-settings",
+    backing: "localstorage",
+    autosave: "auto",
+  },
 );
 
 /**
@@ -275,76 +269,47 @@ export const demoSettingsStore = createStore(
  * Point those at the same-origin wisp endpoint instead of silently failing.
  */
 (function repairWispUrl() {
-	const wispUrl = String(demoSettingsStore.wispUrl ?? "");
-	const loopback = /^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(wispUrl);
-	if (!loopback) return;
-	if (typeof location === "undefined") return;
-	const pageIsLoopback =
-		location.hostname === "localhost" || location.hostname === "127.0.0.1";
-	if (pageIsLoopback) return;
-	demoSettingsStore.wispUrl = DEFAULT_WISP_URL;
+  const wispUrl = String(demoSettingsStore.wispUrl ?? "");
+  const loopback = /^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(wispUrl);
+  if (!loopback) return;
+  if (typeof location === "undefined") return;
+  const pageIsLoopback =
+    location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (pageIsLoopback) return;
+  demoSettingsStore.wispUrl = DEFAULT_WISP_URL;
 })();
 
 export function normalizeWispUrl(value: string) {
-	const trimmed = value.trim();
-	if (!trimmed) {
-		throw new TypeError("Wisp URL is required.");
-	}
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new TypeError("Wisp URL is required.");
+  }
 
-	let normalized = trimmed;
-	if (!normalized.startsWith("ws://") && !normalized.startsWith("wss://")) {
-		normalized = `ws://${normalized}`;
-	}
+  let normalized = trimmed;
+  if (!normalized.startsWith("ws://") && !normalized.startsWith("wss://")) {
+    normalized = `ws://${normalized}`;
+  }
 
-	const parsed = new URL(normalized);
-	if (!parsed.pathname || parsed.pathname === "") {
-		parsed.pathname = "/";
-	}
-	if (!parsed.pathname.endsWith("/")) {
-		parsed.pathname = `${parsed.pathname}/`;
-	}
+  const parsed = new URL(normalized);
+  if (!parsed.pathname || parsed.pathname === "") {
+    parsed.pathname = "/";
+  }
+  if (!parsed.pathname.endsWith("/")) {
+    parsed.pathname = `${parsed.pathname}/`;
+  }
 
-	return parsed.toString();
-}
-
-export function normalizeHomeUrl(value: string) {
-	const trimmed = value.trim();
-	if (!trimmed) {
-		throw new TypeError("Home page URL is required.");
-	}
-
-	const normalized = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)
-		? trimmed
-		: `https://${trimmed}`;
-
-	return new URL(normalized).toString();
+  return parsed.toString();
 }
 
 export function normalizeTransport(value: string): AvailableTransports {
-	if (AVAILABLE_TRANSPORTS.some((t) => t.value === value)) {
-		return value as AvailableTransports;
-	}
-	throw new TypeError(`Unknown transport: ${value}`);
-}
-
-export function normalizeMaxRequests(value: string | number) {
-	const parsed = Number(value);
-	if (!Number.isFinite(parsed)) {
-		throw new TypeError("Request log limit must be a number.");
-	}
-
-	const rounded = Math.round(parsed);
-	if (rounded < 10 || rounded > 5000) {
-		throw new RangeError("Request log limit must be between 10 and 5000.");
-	}
-
-	return rounded;
+  if (AVAILABLE_TRANSPORTS.some((t) => t.value === value)) {
+    return value as AvailableTransports;
+  }
+  throw new TypeError(`Unknown transport: ${value}`);
 }
 
 export const demoSettingsDefaults = {
-	wispUrl: normalizeWispUrl(DEFAULT_WISP_URL),
-	transport: DEFAULT_TRANSPORT,
-	homeUrl: normalizeHomeUrl(DEFAULT_HOME_URL),
-	maxRequests: DEFAULT_MAX_REQUESTS,
-	searchEngine: DEFAULT_SEARCH_ENGINE,
+  wispUrl: normalizeWispUrl(DEFAULT_WISP_URL),
+  transport: DEFAULT_TRANSPORT,
+  searchEngine: DEFAULT_SEARCH_ENGINE,
 };
