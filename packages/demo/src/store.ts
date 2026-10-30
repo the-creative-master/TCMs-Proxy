@@ -234,27 +234,25 @@ export function monogram(name: string) {
 /*                                  settings                                  */
 /* -------------------------------------------------------------------------- */
 
+/** the public Wisp network — requests leave from here, not from your browser */
+export const PUBLIC_WISP_URL = "wss://wisp.mercurywork.shop/";
+
 function runtimeDefaultWispUrl() {
   const fromEnv = import.meta.env.VITE_WISP_URL as string | undefined;
   if (fromEnv) return fromEnv;
-
-  const isSecure =
-    typeof location !== "undefined" && location.protocol === "https:";
-  const host =
-    typeof location !== "undefined" && location.host
-      ? location.host
-      : "localhost:4141";
-  return `${isSecure ? "wss:" : "ws:"}//${host}/wisp/`;
+  return PUBLIC_WISP_URL;
 }
 
 const DEFAULT_WISP_URL = runtimeDefaultWispUrl();
 const DEFAULT_TRANSPORT: AvailableTransports = "libcurl";
+const WISP_DEFAULT_REVISION = 2;
 
 export const demoSettingsStore = createStore(
   {
     transport: DEFAULT_TRANSPORT as AvailableTransports,
     wispUrl: DEFAULT_WISP_URL,
     searchEngine: DEFAULT_SEARCH_ENGINE as SearchEngineId,
+    wispRevision: WISP_DEFAULT_REVISION,
   },
   {
     ident: "scramjet-demo-settings",
@@ -264,19 +262,43 @@ export const demoSettingsStore = createStore(
 );
 
 /**
- * Someone may have a wisp url from a previous run pointing at localhost while
- * the app is actually served from a different host (preview/proxy setups).
- * Point those at the same-origin wisp endpoint instead of silently failing.
+ * Older builds defaulted to a same-origin relay (ws://<this host>/wisp/), which
+ * only works when the page itself is the dev server. Migrate anyone still
+ * sitting on that default over to the public Wisp, but never touch a server the
+ * user actually typed in.
  */
-(function repairWispUrl() {
-  const wispUrl = String(demoSettingsStore.wispUrl ?? "");
-  const loopback = /^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(wispUrl);
-  if (!loopback) return;
-  if (typeof location === "undefined") return;
-  const pageIsLoopback =
-    location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  if (pageIsLoopback) return;
-  demoSettingsStore.wispUrl = DEFAULT_WISP_URL;
+(function migrateWispDefault() {
+  if (import.meta.env.VITE_WISP_URL) return;
+
+  // read what is actually persisted: the store merge fills in the new
+  // revision for keys that were never saved, so the merged state can't tell
+  // us whether this visitor has seen the new default yet.
+  let stored: Record<string, unknown> | null = null;
+  try {
+    const raw =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("dls-scramjet-demo-settings")
+        : null;
+    stored = raw ? JSON.parse(raw) : null;
+  } catch {
+    stored = null;
+  }
+
+  const seenRevision = stored?.wispRevision === WISP_DEFAULT_REVISION;
+  if (!seenRevision) {
+    const current = String(demoSettingsStore.wispUrl ?? "");
+    const sameOriginRelay =
+      typeof location !== "undefined"
+        ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/wisp/`
+        : "";
+    const oldRelayPattern =
+      /^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(current) ||
+      (!!sameOriginRelay && current === sameOriginRelay);
+    if (!current || oldRelayPattern) {
+      demoSettingsStore.wispUrl = DEFAULT_WISP_URL;
+    }
+  }
+  demoSettingsStore.wispRevision = WISP_DEFAULT_REVISION;
 })();
 
 export function normalizeWispUrl(value: string) {

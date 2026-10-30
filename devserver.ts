@@ -65,6 +65,7 @@ const WISP_PORT = process.env.WISP_PORT || 4142;
 // that the browser can reach it on the same origin (needed when the dev server
 // is opened through a tunnel / preview url instead of localhost).
 const WISP_PROXY_PATH = "/wisp/";
+const DEFAULT_WISP_URL = "wss://wisp.mercurywork.shop/";
 
 if (process.env.VITE_WISP_URL) {
   process.env.VITE_WISP_URL = normalizeWebsocketUrl(process.env.VITE_WISP_URL);
@@ -123,9 +124,13 @@ const lines = [
   ),
   black()(
     `${accent("wisp")} ${connector} ${urlColor(
-      process.env.VITE_WISP_URL ??
-        `same origin (http://localhost:${DEMO_PORT}${WISP_PROXY_PATH})`,
+      process.env.VITE_WISP_URL ?? DEFAULT_WISP_URL,
     )}`,
+  ),
+  black()(
+    chalk.dim(
+      `        local relay also available: ws://localhost:${DEMO_PORT}${WISP_PROXY_PATH}`,
+    ),
   ),
   black()(chalk.dim(`[${branch}] ${commit} scramjet/${version}`)),
 ];
