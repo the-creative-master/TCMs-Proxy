@@ -47,7 +47,7 @@ if (brokenReason) {
   });
 }
 
-const image = await fs.readFile("./assets/scramjet-mini-noalpha.png");
+const image = await fs.readFile("./assets/tcm-mini-noalpha.png");
 
 const commit = execSync("git rev-parse --short HEAD", {
   encoding: "utf-8",
@@ -120,7 +120,7 @@ const server = await createServer({
 
 /**
  * A proxied document always comes back through the service worker, so a request
- * for the scramjet prefix that reaches this server means the worker missed it.
+ * for the engine prefix that reaches this server means the worker missed it.
  * Vite's SPA fallback would then answer with index.html and the demo would load
  * inside its own viewport — so answer with a real error instead of nesting.
  */
@@ -146,7 +146,7 @@ server.middlewares.stack.unshift({
        <div style="max-width:520px;padding:28px">
          <div style="font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:#ff8f8f;margin-bottom:10px">Proxy miss</div>
          <h1 style="font-size:1.2rem;margin:0 0 10px">This request never reached the service worker</h1>
-         <p style="color:#99a1b8;margin:0 0 14px">Scramjet prefixes proxied documents with <code>${escapeForPage(url)}</code>. Seeing this page means the worker was not controlling the request yet — most of the time a reload is all it takes.</p>
+         <p style="color:#99a1b8;margin:0 0 14px">Proxied documents live under <code>${escapeForPage(url)}</code>. Seeing this page means the worker was not controlling the request yet — most of the time a reload is all it takes.</p>
          <button onclick="location.reload()" style="border:0;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;color:#fff;cursor:pointer;background:linear-gradient(135deg,#7c5cff,#4f8bff)">Reload</button>
        </div>
        <script>
@@ -178,7 +178,7 @@ const note = (text: string) => chalk.hex("#CDB4DB")(text);
 const connector = chalk.hex("#8D99AE").dim("@");
 
 const lines = [
-  black()(`${highlight("SCRAMJET DEV SERVER")}`),
+  black()(`${highlight("TCM'S PROXY DEV SERVER")}`),
   black()(
     `${accent("demo")} ${connector} ${urlColor(
       `http://localhost:${DEMO_PORT}/`,
@@ -194,10 +194,10 @@ const lines = [
       `        local relay also available: ws://localhost:${DEMO_PORT}${WISP_PROXY_PATH}`,
     ),
   ),
-  black()(chalk.dim(`[${branch}] ${commit} scramjet/${version}`)),
+  black()(chalk.dim(`[${branch}] ${commit} engine/${version}`)),
 ];
 
-// Building scramjet from source requires the rust rewriter
+// Building the engine from source requires the rust rewriter
 // (pnpm rewriter:build -> packages/core/rewriter/wasm/out/wasm.js).
 // When it isn't built, rebuilding would overwrite the prebuilt dist with a
 // bundle that can't load the wasm rewriter (the browser then shows nothing),

@@ -17,9 +17,10 @@ type EngineSpec = {
 
 const ENGINES: EngineSpec[] = [
   {
+    // these paths/globals are fixed by the engine bundle itself
     src: "/scramjet/scramjet.js",
     globalName: "$scramjet",
-    label: "proxy engine (scramjet)",
+    label: "proxy engine",
   },
   {
     src: "/controller/controller.api.js",

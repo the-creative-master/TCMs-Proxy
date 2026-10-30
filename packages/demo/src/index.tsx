@@ -171,7 +171,7 @@ async function init() {
 					<p style="color:#99a1b8;line-height:1.6;font-size:0.88rem;margin:0 0 8px">${escapeHtml(
 						e instanceof Error ? e.message : String(e),
 					)}</p>
-					<p style="color:#7d859b;line-height:1.6;font-size:0.8rem;margin:0 0 14px">Service worker registration or the controller handshake failed. Scramjet routes every request through a service worker, so it cannot run without one. Check the console for details, then reload. If this page is embedded in a preview frame, open it in a new tab.</p>
+					<p style="color:#7d859b;line-height:1.6;font-size:0.8rem;margin:0 0 14px">Service worker registration or the controller handshake failed. This proxy routes every request through a service worker, so it cannot run without one. Check the console for details, then reload. If this page is embedded in a preview frame, open it in a new tab.</p>
 					<button onclick="location.reload()" style="border:0;border-radius:10px;padding:9px 14px;font:inherit;font-size:0.82rem;font-weight:600;color:#fff;cursor:pointer;background:linear-gradient(135deg,#7c5cff,#4f8bff)">Reload</button>
 				</div>
 			</div>`;

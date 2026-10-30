@@ -261,8 +261,8 @@ const NewTab: Component<
 
         <div class="newtab-foot">
           <span>
-            <strong>Scramjet</strong> keeps every request rewritten and
-            tunnelled through Wisp
+            Every request is rewritten and tunnelled through Wisp — the site you
+            visit never talks to your browser directly
           </span>
         </div>
       </div>
