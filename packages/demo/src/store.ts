@@ -307,8 +307,21 @@ export const LOGO_URL = "./logo.svg";
 /*                                  settings                                  */
 /* -------------------------------------------------------------------------- */
 
-/** the public Wisp network — requests leave from here, not from your browser */
-export const PUBLIC_WISP_URL = "wss://wisp.mercurywork.shop/";
+/**
+ * The public Wisp we ship as the default. Requests leave from here, not from
+ * your browser. webmc.fun is used instead of mercurywork.shop because the
+ * latter rate-limits to 100 kB per IP, which dies on the first real page.
+ */
+export const PUBLIC_WISP_URL = "wss://wisp.webmc.fun/";
+
+/**
+ * Defaults we used to ship. A stored value matching one of these is a leftover
+ * default, not a choice, so it is safe to move to the current one.
+ */
+const RETIRED_DEFAULT_WISP_URLS: ReadonlyArray<string> = [
+  "wss://wisp.mercurywork.shop/",
+  "ws://wisp.mercurywork.shop/",
+];
 
 function runtimeDefaultWispUrl() {
   const fromEnv = import.meta.env.VITE_WISP_URL as string | undefined;
@@ -318,7 +331,7 @@ function runtimeDefaultWispUrl() {
 
 const DEFAULT_WISP_URL = runtimeDefaultWispUrl();
 const DEFAULT_TRANSPORT: AvailableTransports = "libcurl";
-const WISP_DEFAULT_REVISION = 2;
+const WISP_DEFAULT_REVISION = 3;
 
 export const demoSettingsStore = createStore(
   {
@@ -335,10 +348,10 @@ export const demoSettingsStore = createStore(
 );
 
 /**
- * Older builds defaulted to a same-origin relay (ws://<this host>/wisp/), which
- * only works when the page itself is the dev server. Migrate anyone still
- * sitting on that default over to the public Wisp, but never touch a server the
- * user actually typed in.
+ * Older builds defaulted to a same-origin relay (ws://<this host>/wisp/) and
+ * later to a different public server. Migrate anyone still sitting on one of
+ * those over to the current default, but never touch a server the user actually
+ * typed in.
  */
 (function migrateWispDefault() {
   if (import.meta.env.VITE_WISP_URL) return;
@@ -364,10 +377,11 @@ export const demoSettingsStore = createStore(
       typeof location !== "undefined"
         ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/wisp/`
         : "";
-    const oldRelayPattern =
+    const retiredDefault =
+      RETIRED_DEFAULT_WISP_URLS.includes(current) ||
       /^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(current) ||
       (!!sameOriginRelay && current === sameOriginRelay);
-    if (!current || oldRelayPattern) {
+    if (!current || retiredDefault) {
       demoSettingsStore.wispUrl = DEFAULT_WISP_URL;
     }
   }

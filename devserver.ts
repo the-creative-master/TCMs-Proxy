@@ -78,7 +78,7 @@ const escapeForPage = (value: string) =>
         "'": "&#39;",
       })[char] ?? char,
   );
-const DEFAULT_WISP_URL = "wss://wisp.mercurywork.shop/";
+const DEFAULT_WISP_URL = "wss://wisp.webmc.fun/";
 
 if (process.env.VITE_WISP_URL) {
   process.env.VITE_WISP_URL = normalizeWebsocketUrl(process.env.VITE_WISP_URL);
