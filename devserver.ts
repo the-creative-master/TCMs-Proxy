@@ -31,10 +31,16 @@ const version = packagejson.version;
 const DEMO_PORT = process.env.DEMO_PORT || 4141;
 const WISP_PORT = process.env.WISP_PORT || 4142;
 
+// The wisp server is also exposed through the vite dev server on this path so
+// that the browser can reach it on the same origin (needed when the dev server
+// is opened through a tunnel / preview url instead of localhost).
+const WISP_PROXY_PATH = "/wisp/";
+
 if (process.env.VITE_WISP_URL) {
 	process.env.VITE_WISP_URL = normalizeWebsocketUrl(process.env.VITE_WISP_URL);
 } else {
-	process.env.VITE_WISP_URL = `ws://localhost:${WISP_PORT}/`;
+	// let the client derive ws(s)://<current host>/wisp/ at runtime
+	delete process.env.VITE_WISP_URL;
 }
 
 const wispserver = http.createServer((req, res) => {
@@ -54,8 +60,17 @@ const server = await createServer({
 	configFile: "./packages/demo/vite.config.ts",
 	root: "./packages/demo",
 	server: {
+		host: true,
 		port: Number(DEMO_PORT),
 		strictPort: true,
+		allowedHosts: true,
+		proxy: {
+			[WISP_PROXY_PATH]: {
+				target: `ws://127.0.0.1:${WISP_PORT}`,
+				ws: true,
+				rewrite: (path) => path.replace(/^\/wisp\/?/, "/"),
+			},
+		},
 	},
 });
 
@@ -78,7 +93,8 @@ const lines = [
 	),
 	black()(
 		`${accent("wisp")} ${connector} ${urlColor(
-			process.env.VITE_WISP_URL ?? ""
+			process.env.VITE_WISP_URL ??
+				`same origin (http://localhost:${DEMO_PORT}${WISP_PROXY_PATH})`
 		)}`
 	),
 	black()(chalk.dim(`[${branch}] ${commit} scramjet/${version}`)),

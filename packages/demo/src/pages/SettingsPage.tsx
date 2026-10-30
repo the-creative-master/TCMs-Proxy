@@ -2,13 +2,17 @@ import { css, type Component } from "dreamland/core";
 import { controller, getTransport } from "..";
 import {
 	AVAILABLE_TRANSPORTS,
+	SEARCH_ENGINES,
 	type AvailableTransports,
+	type SearchEngineId,
 	demoSettingsDefaults,
 	demoSettingsStore,
-	normalizeHomeUrl,
 	normalizeMaxRequests,
+	normalizeSearchEngine,
 	normalizeTransport,
 	normalizeWispUrl,
+	resetShortcuts,
+	shortcutsStore,
 } from "../store";
 
 const SettingsView: Component<
@@ -16,8 +20,8 @@ const SettingsView: Component<
 	{
 		wispUrlInput: string;
 		transportInput: AvailableTransports;
-		homeUrlInput: string;
 		maxRequestsInput: string;
+		searchEngineInput: SearchEngineId;
 		status: string;
 		error: string;
 	},
@@ -25,16 +29,16 @@ const SettingsView: Component<
 > = function () {
 	this.wispUrlInput ??= demoSettingsStore.wispUrl;
 	this.transportInput ??= demoSettingsStore.transport;
-	this.homeUrlInput ??= demoSettingsStore.homeUrl;
 	this.maxRequestsInput ??= String(demoSettingsStore.maxRequests);
+	this.searchEngineInput ??= demoSettingsStore.searchEngine;
 	this.status ??= "";
 	this.error ??= "";
 
 	const syncInputsFromStore = () => {
 		this.wispUrlInput = demoSettingsStore.wispUrl;
 		this.transportInput = demoSettingsStore.transport;
-		this.homeUrlInput = demoSettingsStore.homeUrl;
 		this.maxRequestsInput = String(demoSettingsStore.maxRequests);
+		this.searchEngineInput = demoSettingsStore.searchEngine;
 	};
 
 	const applySettings = async () => {
@@ -44,20 +48,20 @@ const SettingsView: Component<
 		try {
 			const nextWispUrl = normalizeWispUrl(this.wispUrlInput);
 			const nextTransport = normalizeTransport(this.transportInput);
-			const nextHomeUrl = normalizeHomeUrl(this.homeUrlInput);
 			const nextMaxRequests = normalizeMaxRequests(this.maxRequestsInput);
+			const nextSearchEngine = normalizeSearchEngine(this.searchEngineInput);
 			const wispChanged = nextWispUrl !== demoSettingsStore.wispUrl;
 			const transportChanged = nextTransport !== demoSettingsStore.transport;
 
 			demoSettingsStore.wispUrl = nextWispUrl;
 			demoSettingsStore.transport = nextTransport;
-			demoSettingsStore.homeUrl = nextHomeUrl;
 			demoSettingsStore.maxRequests = nextMaxRequests;
+			demoSettingsStore.searchEngine = nextSearchEngine;
 
 			this.wispUrlInput = nextWispUrl;
 			this.transportInput = nextTransport;
-			this.homeUrlInput = nextHomeUrl;
 			this.maxRequestsInput = String(nextMaxRequests);
+			this.searchEngineInput = nextSearchEngine;
 
 			if (wispChanged || transportChanged) {
 				controller.setTransport(getTransport());
@@ -78,8 +82,8 @@ const SettingsView: Component<
 		this.status = "Resetting settings...";
 		this.wispUrlInput = demoSettingsDefaults.wispUrl;
 		this.transportInput = demoSettingsDefaults.transport;
-		this.homeUrlInput = demoSettingsDefaults.homeUrl;
 		this.maxRequestsInput = String(demoSettingsDefaults.maxRequests);
+		this.searchEngineInput = demoSettingsDefaults.searchEngine;
 		await applySettings();
 	};
 
@@ -88,8 +92,9 @@ const SettingsView: Component<
 			<div class="settings-header">
 				<h2>Demo Settings</h2>
 				<p>
-					Update runtime settings without rebuilding the demo. Wisp changes
-					apply to future requests only.
+					Update runtime settings without reloading. The new tab page is the
+					home page: it hosts the search engine switcher and your shortcuts.
+					Wisp changes apply to future requests only.
 				</p>
 			</div>
 
@@ -125,17 +130,22 @@ const SettingsView: Component<
 			</label>
 
 			<label class="field">
-				<span class="label">Home page URL</span>
-				<input
-					type="text"
-					value={use(this.homeUrlInput)}
-					spellcheck={false}
-					on:input={(e: InputEvent) => {
-						this.homeUrlInput = (e.target as HTMLInputElement).value;
+				<span class="label">Search engine</span>
+				<select
+					value={use(this.searchEngineInput)}
+					on:change={(e: Event) => {
+						this.searchEngineInput = (e.target as HTMLSelectElement)
+							.value as SearchEngineId;
 					}}
-				/>
+				>
+					{SEARCH_ENGINES.map((engine) => (
+						<option value={engine.id}>
+							{engine.label} — {engine.hint}
+						</option>
+					))}
+				</select>
 				<span class="hint">
-					Used as the default browser URL and can be pushed into the omnibox.
+					Used for omnibox searches and for the new tab search box.
 				</span>
 			</label>
 
@@ -155,6 +165,31 @@ const SettingsView: Component<
 					Maximum number of captured requests kept in memory.
 				</span>
 			</label>
+
+			<div class="field">
+				<span class="label">Shortcuts</span>
+				<div class="inline-row">
+					<span class="hint">
+						{use(shortcutsStore.items).map(
+							(items) =>
+								`${items.length} saved shortcut${items.length === 1 ? "" : "s"}`
+						)}
+					</span>
+					<button
+						type="button"
+						on:click={() => {
+							resetShortcuts();
+							this.status = "Shortcuts restored to defaults.";
+							this.error = "";
+						}}
+					>
+						Restore default shortcuts
+					</button>
+				</div>
+				<span class="hint">
+					Add, edit, or remove shortcuts from the browser new tab page.
+				</span>
+			</div>
 
 			<div class="actions">
 				<button type="button" class="primary" on:click={applySettings}>
@@ -191,9 +226,9 @@ SettingsView.style = css`
 		flex: 1;
 		min-width: 0;
 		min-height: 0;
-		padding: 16px;
-		background: #0f0f0f;
-		color: #e5e7eb;
+		padding: 22px;
+		background: #07080e;
+		color: #e9ebf5;
 		overflow: auto;
 		font-family:
 			system-ui,
@@ -204,22 +239,23 @@ SettingsView.style = css`
 	}
 
 	.settings-header {
-		margin-bottom: 16px;
-		padding-bottom: 12px;
-		border-bottom: 1px solid #222;
+		margin-bottom: 18px;
+		padding-bottom: 14px;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 	}
 
 	.settings-header h2 {
 		margin: 0 0 6px;
 		font-size: 1rem;
-		font-weight: 600;
+		font-weight: 650;
+		letter-spacing: -0.01em;
 	}
 
 	.settings-header p {
 		margin: 0;
-		color: #a8a8a8;
-		line-height: 1.45;
-		font-size: 0.84rem;
+		color: #99a1b8;
+		line-height: 1.5;
+		font-size: 0.82rem;
 	}
 
 	.field {
@@ -231,19 +267,19 @@ SettingsView.style = css`
 	}
 
 	.label {
-		font-size: 0.84rem;
-		font-weight: 600;
-		color: #e5e7eb;
+		font-size: 0.8rem;
+		font-weight: 620;
+		color: #e9ebf5;
 	}
 
 	input,
 	select {
 		width: 100%;
-		padding: 0.55em 0.65em;
-		border: 1px solid #2a2a2a;
-		border-radius: 0;
-		background: #111;
-		color: #e5e7eb;
+		padding: 0.55em 0.7em;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 10px;
+		background: rgba(255, 255, 255, 0.04);
+		color: #eef0f8;
 		font: inherit;
 		font-size: 0.88rem;
 		outline: none;
@@ -252,7 +288,8 @@ SettingsView.style = css`
 
 	input:focus,
 	select:focus {
-		border-color: #4a4a4a;
+		border-color: rgba(124, 92, 255, 0.6);
+		box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.14);
 	}
 
 	select {
@@ -260,8 +297,8 @@ SettingsView.style = css`
 		-webkit-appearance: none;
 		-moz-appearance: none;
 		background-image:
-			linear-gradient(45deg, transparent 50%, #8f8f8f 50%),
-			linear-gradient(135deg, #8f8f8f 50%, transparent 50%);
+			linear-gradient(45deg, transparent 50%, #9aa2b8 50%),
+			linear-gradient(135deg, #9aa2b8 50%, transparent 50%);
 		background-position:
 			calc(100% - 14px) 50%,
 			calc(100% - 9px) 50%;
@@ -274,8 +311,20 @@ SettingsView.style = css`
 	}
 
 	.hint {
-		color: #8f8f8f;
-		font-size: 0.78rem;
+		color: #868ea4;
+		font-size: 0.76rem;
+	}
+	.inline-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.inline-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
 	}
 
 	.actions {
@@ -286,43 +335,55 @@ SettingsView.style = css`
 	}
 
 	button {
-		border: 1px solid #2a2a2a;
-		border-radius: 0;
-		background: #1a1a1a;
-		color: #e5e7eb;
-		padding: 0.45em 0.8em;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 10px;
+		background: rgba(255, 255, 255, 0.05);
+		color: #e9ebf5;
+		padding: 0.5em 0.85em;
 		cursor: pointer;
 		font: inherit;
-		font-size: 0.82rem;
+		font-size: 0.8rem;
+		font-weight: 550;
 		line-height: 1.2;
-		min-height: 28px;
+		min-height: 30px;
+		transition:
+			background 0.12s ease,
+			transform 0.12s ease;
 	}
 
 	button:hover {
-		background: #222;
+		background: rgba(255, 255, 255, 0.1);
+	}
+
+	button:active {
+		transform: translateY(1px);
 	}
 
 	button.primary {
-		border-color: #4a4a4a;
-		background: #1f1f1f;
+		border-color: transparent;
+		background: linear-gradient(135deg, #7c5cff, #4f8bff);
+		color: #fff;
+		box-shadow: 0 8px 22px rgba(96, 92, 255, 0.3);
 	}
 
 	button.primary:hover {
-		background: #262626;
+		background: linear-gradient(135deg, #8a6dff, #5c95ff);
 	}
 
 	.message {
 		margin-top: 12px;
-		padding: 0.65em 0.8em;
-		border: 1px solid #2a2a2a;
-		background: #111;
+		padding: 0.65em 0.85em;
+		border: 1px solid rgba(255, 255, 255, 0.09);
+		border-radius: 10px;
+		background: rgba(255, 255, 255, 0.04);
 		font-size: 0.82rem;
 		max-width: 720px;
 	}
 
 	.message.error {
-		border-color: #5a2a2a;
-		color: #e7b0b0;
+		border-color: rgba(255, 90, 90, 0.3);
+		background: rgba(255, 90, 90, 0.08);
+		color: #ffb4b4;
 	}
 
 	.message.status {

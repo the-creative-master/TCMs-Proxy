@@ -180,19 +180,29 @@ FlagEditor.style = css`
 	}
 
 	:scope.inline .toggle-button {
-		padding: 0.35em 0.7em;
-		background: #1a1a1a;
-		border: 1px solid #2a2a2a;
-		border-radius: 0;
-		font-size: 0.8em;
+		padding: 6px 11px;
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 10px;
+		color: #b9c0d4;
+		font-family:
+			"Inter",
+			system-ui,
+			-apple-system,
+			"Segoe UI",
+			sans-serif;
+		font-size: 0.76em;
+		font-weight: 550;
 		line-height: 1.2;
 		min-height: 28px;
 		display: inline-flex;
 		align-items: center;
+		transition: background 0.12s ease;
 	}
 
 	:scope.inline .toggle-button:hover {
-		background: #222;
+		background: rgba(124, 92, 255, 0.2);
+		color: #eae7ff;
 	}
 
 	.toggle-button:hover {

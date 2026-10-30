@@ -1,0 +1,774 @@
+import { css, type Component } from "dreamland/core";
+import ShortcutEditor from "../components/ShortcutEditor";
+import {
+	SEARCH_ENGINES,
+	addShortcut,
+	demoSettingsStore,
+	getSearchEngine,
+	monogram,
+	removeShortcut,
+	resolveNavigationInput,
+	shortcutTileColor,
+	shortcutsStore,
+	updateShortcut,
+	type Shortcut,
+} from "../store";
+
+const ENGINE_PICKER_ID = "newtab-engine-picker";
+
+const NewTab: Component<
+	{
+		onNavigate: (url: string) => void;
+	},
+	{},
+	{
+		searchEl: HTMLInputElement;
+		engineMenu: boolean;
+		editorTarget: string;
+	}
+> = function (cx) {
+	this.engineMenu ??= false;
+	this.editorTarget ??= "";
+
+	const toggleEngineMenu = () => {
+		this.engineMenu = !this.engineMenu;
+	};
+
+	const pickEngine = (id: (typeof SEARCH_ENGINES)[number]["id"]) => {
+		demoSettingsStore.searchEngine = id;
+		this.engineMenu = false;
+		this.searchEl?.focus();
+	};
+
+	const submitSearch = () => {
+		const raw = this.searchEl?.value ?? "";
+		const target = resolveNavigationInput(raw, demoSettingsStore.searchEngine);
+		if (!target) {
+			this.searchEl?.focus();
+			return;
+		}
+		this.onNavigate?.(target);
+	};
+
+	const openEditor = (target: string) => {
+		this.engineMenu = false;
+		this.editorTarget = target;
+	};
+
+	const editorFor = (target: string) => {
+		if (!target) return null;
+		const existing: Shortcut | null =
+			target === "new"
+				? null
+				: (shortcutsStore.items.find((item) => item.id === target) ?? null);
+		if (target !== "new" && !existing) return null;
+
+		return (
+			<ShortcutEditor
+				shortcut={existing}
+				onSubmit={(name: string, url: string) => {
+					if (existing) updateShortcut(existing.id, name, url);
+					else addShortcut(name, url);
+					return null;
+				}}
+				onDelete={
+					existing
+						? () => {
+								removeShortcut(existing.id);
+								this.editorTarget = "";
+							}
+						: null
+				}
+				onClose={() => {
+					this.editorTarget = "";
+				}}
+			/>
+		);
+	};
+
+	const engineLabel = use(demoSettingsStore.searchEngine).map(
+		(id) => getSearchEngine(id).label
+	);
+
+	return (
+		<div class="newtab">
+			<div class="newtab-aurora" aria-hidden="true"></div>
+
+			<div class="newtab-inner">
+				<div class="hero">
+					<div class="hero-mark">TCM</div>
+					<h1 class="hero-title">
+						<span class="hero-title-main">Where to?</span>
+						<span class="hero-title-sub">
+							Search or type a URL. Everything is proxied.
+						</span>
+					</h1>
+				</div>
+
+				<form
+					class="search-form"
+					on:submit={(e: SubmitEvent) => {
+						e.preventDefault();
+						submitSearch();
+					}}
+				>
+					<div
+						class={use(this.engineMenu).map(
+							(open) => `engine-picker ${open ? "open" : ""}`
+						)}
+						id={ENGINE_PICKER_ID}
+					>
+						<button
+							type="button"
+							class="engine-trigger"
+							title="Change search engine"
+							on:click={(e: MouseEvent) => {
+								e.preventDefault();
+								toggleEngineMenu();
+							}}
+						>
+							<span
+								class={use(demoSettingsStore.searchEngine).map(
+									(id) => `engine-badge engine-${id}`
+								)}
+							>
+								{use(demoSettingsStore.searchEngine).map(
+									(id) => getSearchEngine(id).glyph
+								)}
+							</span>
+							<span class="engine-label">{engineLabel}</span>
+							<span class="engine-chevron">▾</span>
+						</button>
+
+						{use(this.engineMenu).andThen(
+							<div class="engine-menu">
+								{SEARCH_ENGINES.map((engine) => (
+									<button
+										type="button"
+										class={use(demoSettingsStore.searchEngine).map((id) =>
+											id === engine.id
+												? "engine-option active"
+												: "engine-option"
+										)}
+										on:click={(e: MouseEvent) => {
+											e.preventDefault();
+											pickEngine(engine.id);
+										}}
+									>
+										<span
+											class={`engine-badge small engine-${engine.id}`}
+										>
+											{engine.glyph}
+										</span>
+										<span class="engine-option-text">
+											<span class="engine-option-name">{engine.label}</span>
+											<span class="engine-option-hint">{engine.hint}</span>
+										</span>
+										<span class="engine-check">✓</span>
+									</button>
+								))}
+							</div>
+						)}
+					</div>
+
+					<input
+						class="search-input"
+						type="text"
+						spellcheck={false}
+						autocomplete="off"
+						this={use(this.searchEl)}
+						placeholder={use(demoSettingsStore.searchEngine).map(
+							(id) => `Search with ${getSearchEngine(id).label} or type a URL`
+						)}
+					/>
+
+					<button class="search-submit" type="submit" title="Search">
+						<span class="material-symbols-outlined">arrow_forward</span>
+					</button>
+				</form>
+
+				<div class="engine-chips">
+					{SEARCH_ENGINES.map((engine) => (
+						<button
+							type="button"
+							class={use(demoSettingsStore.searchEngine).map((id) =>
+								id === engine.id ? "chip active" : "chip"
+							)}
+							on:click={(e: MouseEvent) => {
+								e.preventDefault();
+								demoSettingsStore.searchEngine = engine.id;
+							}}
+						>
+							<span class={`chip-dot engine-${engine.id}`}></span>
+							{engine.label}
+						</button>
+					))}
+				</div>
+
+				<div class="shortcuts-head">
+					<span class="shortcuts-title">Shortcuts</span>
+					<button
+						type="button"
+						class="shortcuts-add"
+						on:click={() => openEditor("new")}
+					>
+						<span class="material-symbols-outlined">add</span>
+						Add shortcut
+					</button>
+				</div>
+
+				<div class="shortcut-grid">
+					{use(shortcutsStore.items).map((items) =>
+						items.map((item) => (
+							<div
+								class="tile"
+								title={item.url}
+								on:click={() => this.onNavigate?.(item.url)}
+							>
+								<div
+									class="tile-art"
+									style={{ background: shortcutTileColor(item.id) }}
+								>
+									{monogram(item.name)}
+								</div>
+								<div class="tile-name">{item.name}</div>
+								<button
+									type="button"
+									class="tile-action edit"
+									title={`Edit ${item.name}`}
+									on:click={(e: MouseEvent) => {
+										e.stopPropagation();
+										openEditor(item.id);
+									}}
+								>
+									<span class="material-symbols-outlined">edit</span>
+								</button>
+								<button
+									type="button"
+									class="tile-action remove"
+									title={`Remove ${item.name}`}
+									on:click={(e: MouseEvent) => {
+										e.stopPropagation();
+										removeShortcut(item.id);
+									}}
+								>
+									<span class="material-symbols-outlined">close</span>
+								</button>
+							</div>
+						))
+					)}
+
+					<button
+						type="button"
+						class="tile tile-add"
+						on:click={() => openEditor("new")}
+					>
+						<div class="tile-art add-art">
+							<span class="material-symbols-outlined">add</span>
+						</div>
+						<div class="tile-name">Add</div>
+					</button>
+				</div>
+
+				<div class="newtab-foot">
+					<span>
+						Powered by <strong>Scramjet</strong> · requests are rewritten and
+						tunnelled through Wisp
+					</span>
+				</div>
+			</div>
+
+			{use(this.editorTarget).map((target) => editorFor(target))}
+		</div>
+	);
+};
+
+NewTab.style = css`
+	:scope {
+		position: absolute;
+		inset: 0;
+		overflow: auto;
+		background:
+			radial-gradient(
+				1000px 520px at 18% -12%,
+				rgba(124, 92, 255, 0.22),
+				transparent 62%
+			),
+			radial-gradient(
+				820px 460px at 88% 4%,
+				rgba(34, 211, 238, 0.16),
+				transparent 60%
+			),
+			#07080e;
+		color: #e9ebf5;
+		font-family:
+			"Inter",
+			system-ui,
+			-apple-system,
+			"Segoe UI",
+			sans-serif;
+		box-sizing: border-box;
+		z-index: 2;
+		animation: nt-in 0.18s ease-out;
+	}
+	@keyframes nt-in {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+	:scope * {
+		box-sizing: border-box;
+	}
+	.newtab-aurora {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background:
+			radial-gradient(
+				520px 260px at 50% 0%,
+				rgba(124, 92, 255, 0.16),
+				transparent 70%
+			);
+	}
+	.newtab-inner {
+		position: relative;
+		width: min(760px, calc(100% - 40px));
+		margin: 0 auto;
+		padding: clamp(36px, 9vh, 96px) 0 40px;
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
+	}
+	.hero {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 14px;
+		margin-bottom: 6px;
+		text-align: center;
+	}
+	.hero-mark {
+		width: 46px;
+		height: 46px;
+		border-radius: 15px;
+		display: grid;
+		place-items: center;
+		font-size: 0.78rem;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		color: #fff;
+		background: linear-gradient(135deg, #7c5cff, #22d3ee);
+		box-shadow:
+			0 12px 30px rgba(96, 92, 255, 0.4),
+			inset 0 1px 0 rgba(255, 255, 255, 0.35);
+	}
+	.hero-title {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		margin: 0;
+	}
+	.hero-title-main {
+		font-size: clamp(1.6rem, 4vw, 2.1rem);
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		background: linear-gradient(100deg, #ffffff, #b9c0ff 70%, #8de9ff);
+		-webkit-background-clip: text;
+		background-clip: text;
+		color: transparent;
+	}
+	.hero-title-sub {
+		font-size: 0.82rem;
+		font-weight: 450;
+		color: #8d95ad;
+	}
+
+	.search-form {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 7px 7px 7px 8px;
+		border-radius: 18px;
+		background: rgba(20, 23, 38, 0.86);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		box-shadow:
+			0 20px 50px rgba(0, 0, 0, 0.45),
+			inset 0 1px 0 rgba(255, 255, 255, 0.05);
+		backdrop-filter: blur(14px);
+		transition:
+			border-color 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+	.search-form:focus-within {
+		border-color: rgba(124, 92, 255, 0.6);
+		box-shadow:
+			0 20px 50px rgba(0, 0, 0, 0.45),
+			0 0 0 4px rgba(124, 92, 255, 0.15);
+	}
+	.engine-picker {
+		position: relative;
+		flex: none;
+	}
+	.engine-trigger {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		padding: 7px 9px;
+		border-radius: 12px;
+		border: 1px solid transparent;
+		background: rgba(255, 255, 255, 0.05);
+		color: #dfe3f2;
+		font: inherit;
+		font-size: 0.8rem;
+		font-weight: 560;
+		cursor: pointer;
+		transition: background 0.14s ease;
+	}
+	.engine-trigger:hover {
+		background: rgba(255, 255, 255, 0.1);
+	}
+	.engine-picker.open .engine-trigger {
+		background: rgba(124, 92, 255, 0.2);
+		border-color: rgba(124, 92, 255, 0.4);
+	}
+	.engine-badge {
+		width: 19px;
+		height: 19px;
+		border-radius: 7px;
+		display: grid;
+		place-items: center;
+		font-size: 0.68rem;
+		font-weight: 800;
+		color: #fff;
+		flex: none;
+		text-transform: none;
+	}
+	.engine-badge.small {
+		width: 18px;
+		height: 18px;
+		border-radius: 6px;
+		font-size: 0.64rem;
+	}
+	.engine-google {
+		background: #4285f4;
+	}
+	.engine-bing {
+		background: #00a4ef;
+	}
+	.engine-duckduckgo {
+		background: #de5833;
+	}
+	.engine-brave {
+		background: #fb542b;
+	}
+	.engine-chevron {
+		font-size: 0.6rem;
+		color: #9aa2b8;
+	}
+	.engine-menu {
+		position: absolute;
+		top: calc(100% + 8px);
+		left: 0;
+		z-index: 20;
+		width: 232px;
+		padding: 6px;
+		border-radius: 14px;
+		background: rgba(18, 21, 34, 0.98);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		animation: nt-menu 0.12s ease-out;
+	}
+	@keyframes nt-menu {
+		from {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+	.engine-option {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		padding: 8px 9px;
+		border: 0;
+		border-radius: 10px;
+		background: transparent;
+		color: #e4e7f3;
+		font: inherit;
+		cursor: pointer;
+		text-align: left;
+	}
+	.engine-option:hover {
+		background: rgba(255, 255, 255, 0.07);
+	}
+	.engine-option-text {
+		display: flex;
+		flex-direction: column;
+		line-height: 1.2;
+		flex: 1;
+	}
+	.engine-option-name {
+		font-size: 0.82rem;
+		font-weight: 560;
+	}
+	.engine-option-hint {
+		font-size: 0.7rem;
+		color: #868ea4;
+	}
+	.engine-check {
+		opacity: 0;
+		color: #9f8cff;
+		font-size: 0.78rem;
+	}
+	.engine-option.active .engine-check {
+		opacity: 1;
+	}
+	.search-input {
+		flex: 1;
+		min-width: 0;
+		border: 0;
+		background: transparent;
+		color: #f2f4fb;
+		font: inherit;
+		font-size: 0.95rem;
+		padding: 8px 4px;
+		outline: none;
+	}
+	.search-input::placeholder {
+		color: #767f96;
+	}
+	.search-submit {
+		flex: none;
+		width: 38px;
+		height: 38px;
+		border-radius: 13px;
+		border: 0;
+		cursor: pointer;
+		display: grid;
+		place-items: center;
+		color: #fff;
+		background: linear-gradient(135deg, #7c5cff, #4f8bff);
+		box-shadow: 0 10px 24px rgba(96, 92, 255, 0.36);
+		transition: transform 0.12s ease;
+	}
+	.search-submit:hover {
+		transform: translateY(-1px);
+	}
+	.search-submit:active {
+		transform: translateY(0);
+	}
+	.search-submit .material-symbols-outlined {
+		font-size: 18px;
+		color: #fff;
+	}
+
+	.engine-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 7px;
+		justify-content: center;
+	}
+	.chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 11px;
+		border-radius: 999px;
+		border: 1px solid rgba(255, 255, 255, 0.09);
+		background: rgba(255, 255, 255, 0.03);
+		color: #a9b1c6;
+		font: inherit;
+		font-size: 0.75rem;
+		font-weight: 540;
+		cursor: pointer;
+		transition:
+			background 0.14s ease,
+			color 0.14s ease,
+			border-color 0.14s ease;
+	}
+	.chip:hover {
+		background: rgba(255, 255, 255, 0.08);
+		color: #e6e9f5;
+	}
+	.chip.active {
+		color: #fff;
+		background: rgba(124, 92, 255, 0.18);
+		border-color: rgba(124, 92, 255, 0.45);
+	}
+	.chip-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+	}
+
+	.shortcuts-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-top: 12px;
+		padding: 0 2px;
+	}
+	.shortcuts-title {
+		font-size: 0.7rem;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: #767f96;
+		font-weight: 650;
+	}
+	.shortcuts-add {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		border: 0;
+		background: transparent;
+		color: #9c8dff;
+		font: inherit;
+		font-size: 0.76rem;
+		font-weight: 580;
+		cursor: pointer;
+		padding: 4px 6px;
+		border-radius: 8px;
+	}
+	.shortcuts-add:hover {
+		background: rgba(124, 92, 255, 0.12);
+		color: #c2b8ff;
+	}
+	.shortcuts-add .material-symbols-outlined {
+		font-size: 15px;
+	}
+
+	.shortcut-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
+		gap: 10px;
+	}
+	.tile {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		padding: 14px 8px 10px;
+		border-radius: 16px;
+		border: 1px solid rgba(255, 255, 255, 0.06);
+		background: rgba(255, 255, 255, 0.035);
+		cursor: pointer;
+		font: inherit;
+		color: inherit;
+		transition:
+			transform 0.14s ease,
+			background 0.14s ease,
+			border-color 0.14s ease;
+	}
+	.tile:hover {
+		transform: translateY(-2px);
+		background: rgba(255, 255, 255, 0.075);
+		border-color: rgba(255, 255, 255, 0.14);
+	}
+	.tile-art {
+		width: 40px;
+		height: 40px;
+		border-radius: 13px;
+		display: grid;
+		place-items: center;
+		font-size: 1.02rem;
+		font-weight: 750;
+		color: #fff;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+	}
+	.tile-name {
+		font-size: 0.74rem;
+		font-weight: 540;
+		color: #d5daea;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.tile-action {
+		position: absolute;
+		top: 5px;
+		width: 20px;
+		height: 20px;
+		border-radius: 7px;
+		border: 0;
+		padding: 0;
+		display: grid;
+		place-items: center;
+		background: rgba(10, 12, 20, 0.72);
+		color: #b9c0d4;
+		cursor: pointer;
+		opacity: 0;
+		transition:
+			opacity 0.12s ease,
+			background 0.12s ease;
+	}
+	.tile-action .material-symbols-outlined {
+		font-size: 12px;
+	}
+	.tile-action.edit {
+		right: 27px;
+	}
+	.tile-action.remove {
+		right: 5px;
+	}
+	.tile:hover .tile-action {
+		opacity: 1;
+	}
+	.tile-action:hover {
+		background: rgba(124, 92, 255, 0.5);
+		color: #fff;
+	}
+	.tile-action.remove:hover {
+		background: rgba(255, 90, 90, 0.6);
+	}
+	.tile-add {
+		border-style: dashed;
+		background: transparent;
+		color: #8b93a9;
+	}
+	.add-art {
+		background: rgba(255, 255, 255, 0.05);
+		color: #9aa2b8;
+		box-shadow: none;
+	}
+	.tile-add:hover {
+		background: rgba(124, 92, 255, 0.1);
+		border-color: rgba(124, 92, 255, 0.4);
+	}
+	.tile-add:hover .add-art {
+		color: #c2b8ff;
+	}
+
+	.newtab-foot {
+		margin-top: 18px;
+		text-align: center;
+		font-size: 0.7rem;
+		color: #626a7f;
+	}
+	.newtab-foot strong {
+		color: #8b93a9;
+		font-weight: 600;
+	}
+
+	@media (max-width: 560px) {
+		.engine-label,
+		.engine-chevron {
+			display: none;
+		}
+		.newtab-inner {
+			width: calc(100% - 24px);
+		}
+	}
+`;
+
+export default NewTab;

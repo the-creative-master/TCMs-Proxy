@@ -1,45 +1,90 @@
-import {
-	css,
-	type Delegate,
-	type Component,
-	createState,
-} from "dreamland/core";
+import { css, type Component, createState } from "dreamland/core";
 import {
 	CatchEscapedLinksPlugin,
 	UrlWatcherPlugin,
 } from "@mercuryworkshop/scramjet-utils";
 import { versionInfo } from "@mercuryworkshop/scramjet";
 import { cachePlugin, controller } from "..";
-import { demoSettingsStore } from "../store";
+import {
+	SEARCH_ENGINES,
+	demoSettingsStore,
+	getSearchEngine,
+	resolveNavigationInput,
+} from "../store";
 import homepage from "./homepage.html?raw";
+import NewTab from "./NewTab";
 import type { Frame } from "@mercuryworkshop/scramjet-controller";
 
 export const browserState = createState({
-	url: demoSettingsStore.homeUrl,
+	url: "",
 	frame: null! as Frame,
+	showHome: true,
 });
 
-export const Omnibox: Component = function (cx) {
-	const navigate = () => {
-		if (!browserState.url.startsWith("http")) {
-			browserState.url = `https://${browserState.url}`;
-		}
-		demoSettingsStore.homeUrl = browserState.url;
-		browserState.frame?.go(browserState.url);
+/** send the browser frame to a url (search queries get resolved first) */
+export function navigateTo(url: string) {
+	browserState.url = url;
+	browserState.showHome = false;
+	try {
+		browserState.frame?.go(url);
+	} catch (error) {
+		console.error("[browser] navigation failed", error);
+	}
+}
+
+export function navigateToInput(input: string) {
+	const target = resolveNavigationInput(input, demoSettingsStore.searchEngine);
+	if (target) navigateTo(target);
+}
+
+export function goHome() {
+	browserState.showHome = true;
+}
+
+export const Omnibox: Component<
+	{},
+	{},
+	{
+		inputEl: HTMLInputElement;
+	}
+> = function (cx) {
+	const submit = () => {
+		const value = this.inputEl?.value ?? browserState.url;
+		navigateToInput(value);
 	};
+
+	const cycleEngine = () => {
+		const current = demoSettingsStore.searchEngine;
+		const index = SEARCH_ENGINES.findIndex((engine) => engine.id === current);
+		const next = SEARCH_ENGINES[(index + 1) % SEARCH_ENGINES.length];
+		demoSettingsStore.searchEngine = next.id;
+	};
+
+	cx.mount = () => {
+		const focusOmnibox = (event: KeyboardEvent) => {
+			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "l") {
+				event.preventDefault();
+				this.inputEl?.focus();
+				this.inputEl?.select();
+			}
+		};
+		document.addEventListener("keydown", focusOmnibox);
+	};
+
 	return (
 		<form
 			class="url-form"
 			on:submit={(e: SubmitEvent) => {
 				e.preventDefault();
-				navigate();
+				submit();
 			}}
 		>
 			<div class="browser-omnibox-shell">
-				<div class="omnibox-nav" aria-hidden="true">
+				<div class="omnibox-nav">
 					<button
 						type="button"
 						class="nav-btn"
+						title="Back"
 						on:click={() => browserState.frame?.back()}
 					>
 						<span class="material-symbols-outlined">arrow_back</span>
@@ -47,6 +92,7 @@ export const Omnibox: Component = function (cx) {
 					<button
 						type="button"
 						class="nav-btn"
+						title="Forward"
 						on:click={() => browserState.frame?.forward()}
 					>
 						<span class="material-symbols-outlined">arrow_forward</span>
@@ -54,67 +100,125 @@ export const Omnibox: Component = function (cx) {
 					<button
 						type="button"
 						class="nav-btn"
+						title="Reload"
 						on:click={() => browserState.frame?.reload()}
 					>
 						<span class="material-symbols-outlined">refresh</span>
 					</button>
+					<button
+						type="button"
+						class="nav-btn"
+						title="Home"
+						on:click={() => goHome()}
+					>
+						<span class="material-symbols-outlined">home</span>
+					</button>
 				</div>
-				<input
-					id="search"
-					class="url-input"
-					type="text"
-					value={use(browserState.url)}
-					spellcheck="false"
-					placeholder="Enter URL or search..."
-				/>
+
+				<div class="omnibox-input-wrap">
+					<input
+						id="search"
+						class="url-input"
+						type="text"
+						spellcheck="false"
+						autocomplete="off"
+						this={use(this.inputEl)}
+						value={use(browserState.url)}
+						placeholder="Search or enter address"
+					/>
+				</div>
+
+				<button
+					type="button"
+					class="engine-switch"
+					title="Click to switch search engine"
+					on:click={(e: MouseEvent) => {
+						e.preventDefault();
+						cycleEngine();
+					}}
+				>
+					<span
+						class={use(demoSettingsStore.searchEngine).map(
+							(id) => `engine-switch-dot engine-${id}`
+						)}
+					></span>
+					<span class="engine-switch-label">
+						{use(demoSettingsStore.searchEngine).map(
+							(id) => getSearchEngine(id).label
+						)}
+					</span>
+				</button>
+
+				<button type="submit" class="go-btn" title="Go">
+					<span class="material-symbols-outlined">arrow_forward</span>
+				</button>
 			</div>
 		</form>
 	);
 };
+
 Omnibox.style = css`
 	:scope {
 		display: flex;
 		align-items: center;
-		/*padding: 0.25em 0.45em;*/
-		background: #0f0f0f;
-		border-bottom: 1px solid #2a2a2a;
+		padding: 7px 9px;
+		background: rgba(12, 14, 22, 0.92);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 		min-width: 0;
 		width: 100%;
+		box-sizing: border-box;
+		font-family:
+			"Inter",
+			system-ui,
+			-apple-system,
+			"Segoe UI",
+			sans-serif;
 	}
 	.browser-omnibox-shell {
 		display: flex;
 		width: 100%;
 		align-items: center;
-		gap: 0.35em;
+		gap: 6px;
 		min-width: 0;
-		border: 0;
-		background: transparent;
-		padding: 0;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		background: rgba(255, 255, 255, 0.04);
+		padding: 3px 4px 3px 6px;
+		border-radius: 13px;
 		flex: 1;
+		transition:
+			border-color 0.14s ease,
+			box-shadow 0.14s ease;
+	}
+	.browser-omnibox-shell:focus-within {
+		border-color: rgba(124, 92, 255, 0.55);
+		box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.14);
 	}
 	.omnibox-nav {
 		display: flex;
 		align-items: center;
-		gap: 0.15em;
-		padding-right: 0.25em;
-		border-right: 1px solid #2a2a2a;
+		gap: 1px;
+		padding-right: 5px;
+		border-right: 1px solid rgba(255, 255, 255, 0.07);
 	}
 	.nav-btn {
 		border: 0;
 		background: transparent;
-		color: #8f8f8f;
-		width: 1.5em;
-		height: 1.5em;
+		color: #939bb1;
+		width: 26px;
+		height: 26px;
 		padding: 0;
-		border-radius: 3px;
+		border-radius: 8px;
 		cursor: pointer;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
+		transition:
+			background 0.12s ease,
+			color 0.12s ease;
 	}
 	.nav-btn:hover {
-		background: #1f1f1f;
-		color: #d0d0d0;
+		background: rgba(255, 255, 255, 0.09);
+		color: #eef0f8;
 	}
 	.browser-omnibox-shell .material-symbols-outlined {
 		font-size: 15px !important;
@@ -125,19 +229,86 @@ Omnibox.style = css`
 			"FILL" 0,
 			"GRAD" 0;
 	}
+	.omnibox-input-wrap {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+	}
 	.url-input {
 		box-sizing: border-box;
 		width: 100%;
-		padding: 0.22em 0.18em;
-		font-size: 0.9em;
-		border: 1px solid transparent;
-		border-radius: 3px;
+		padding: 6px 6px;
+		font-size: 0.86rem;
+		border: 0;
+		border-radius: 8px;
 		background: transparent;
-		color: #e5e7eb;
+		color: #eef0f8;
 		outline: none;
+		font-family: inherit;
 	}
 	.url-input::placeholder {
-		color: #6f7680;
+		color: #737b91;
+	}
+	.engine-switch {
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		border: 1px solid transparent;
+		background: rgba(255, 255, 255, 0.05);
+		color: #b9c0d4;
+		font: inherit;
+		font-size: 0.72rem;
+		font-weight: 560;
+		padding: 4px 9px;
+		border-radius: 9px;
+		cursor: pointer;
+		transition:
+			background 0.12s ease,
+			color 0.12s ease;
+	}
+	.engine-switch:hover {
+		background: rgba(124, 92, 255, 0.18);
+		color: #eae7ff;
+	}
+	.engine-switch-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+	}
+	.engine-google {
+		background: #4285f4;
+	}
+	.engine-bing {
+		background: #00a4ef;
+	}
+	.engine-duckduckgo {
+		background: #de5833;
+	}
+	.engine-brave {
+		background: #fb542b;
+	}
+	.go-btn {
+		flex: none;
+		width: 28px;
+		height: 28px;
+		border: 0;
+		border-radius: 9px;
+		display: grid;
+		place-items: center;
+		cursor: pointer;
+		color: #fff;
+		background: linear-gradient(135deg, #7c5cff, #4f8bff);
+		box-shadow: 0 6px 16px rgba(96, 92, 255, 0.3);
+	}
+	.go-btn .material-symbols-outlined {
+		font-size: 15px !important;
+		color: #fff;
+	}
+	@media (max-width: 600px) {
+		.engine-switch-label {
+			display: none;
+		}
 	}
 `;
 
@@ -155,6 +326,7 @@ const BrowserView: Component<
 
 		let urlWatcher = new UrlWatcherPlugin((url) => {
 			browserState.url = url;
+			if (/^https?:/i.test(url)) browserState.showHome = false;
 		});
 		let catchEscapedLinks = new CatchEscapedLinksPlugin(
 			(url) =>
@@ -183,7 +355,7 @@ const BrowserView: Component<
 
 		let goto = new URL(location.href).searchParams.get("goto");
 		if (goto) {
-			browserState.frame?.go(goto);
+			navigateTo(goto);
 			history.replaceState(null, "", location.href.split("?")[0]);
 		}
 	};
@@ -194,7 +366,19 @@ const BrowserView: Component<
 				(active) => `tab-panel browser-view ${active ? "active" : ""}`
 			)}
 		>
-			<iframe this={use(this.frameel)}></iframe>
+			<iframe
+				this={use(this.frameel)}
+				class={use(browserState.showHome).map((home) =>
+					home ? "site-frame hidden" : "site-frame"
+				)}
+			></iframe>
+			{use(browserState.showHome).andThen(
+				<NewTab
+					onNavigate={(url: string) => {
+						navigateTo(url);
+					}}
+				/>
+			)}
 		</div>
 	);
 };
@@ -207,15 +391,22 @@ BrowserView.style = css`
 		min-height: 0;
 		display: none;
 		flex-direction: column;
+		position: relative;
+		background: #07080e;
 	}
 	:scope.active {
 		display: flex;
 	}
 
-	iframe {
+	iframe.site-frame {
 		background: white;
 		flex: 1;
 		border: none;
+		width: 100%;
+		min-height: 0;
+	}
+	iframe.site-frame.hidden {
+		visibility: hidden;
 	}
 `;
 
