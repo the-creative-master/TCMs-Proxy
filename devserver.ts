@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { stdout } from "node:process";
@@ -9,21 +9,21 @@ import { createServer } from "vite";
 //@ts-expect-error no typedefs
 import { server as wisp } from "@mercuryworkshop/wisp-js/server";
 import {
-	normalizeWebsocketUrl,
-	warnOnUrlEscape,
-	runRspack,
-	black,
-	printBanner,
+  normalizeWebsocketUrl,
+  warnOnUrlEscape,
+  runRspack,
+  black,
+  printBanner,
 } from "./devlib.ts";
 import rspackConfig from "./rspack.config.ts";
 
 const image = await fs.readFile("./assets/scramjet-mini-noalpha.png");
 
 const commit = execSync("git rev-parse --short HEAD", {
-	encoding: "utf-8",
+  encoding: "utf-8",
 }).replace(/\r?\n|\r/g, "");
 const branch = execSync("git rev-parse --abbrev-ref HEAD", {
-	encoding: "utf-8",
+  encoding: "utf-8",
 }).replace(/\r?\n|\r/g, "");
 const packagejson = JSON.parse(await fs.readFile("./package.json", "utf-8"));
 const version = packagejson.version;
@@ -37,41 +37,41 @@ const WISP_PORT = process.env.WISP_PORT || 4142;
 const WISP_PROXY_PATH = "/wisp/";
 
 if (process.env.VITE_WISP_URL) {
-	process.env.VITE_WISP_URL = normalizeWebsocketUrl(process.env.VITE_WISP_URL);
+  process.env.VITE_WISP_URL = normalizeWebsocketUrl(process.env.VITE_WISP_URL);
 } else {
-	// let the client derive ws(s)://<current host>/wisp/ at runtime
-	delete process.env.VITE_WISP_URL;
+  // let the client derive ws(s)://<current host>/wisp/ at runtime
+  delete process.env.VITE_WISP_URL;
 }
 
 const wispserver = http.createServer((req, res) => {
-	res.writeHead(200, { "Content-Type": "text/plain" });
-	res.end("wisp server js rewrite");
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("wisp server js rewrite");
 });
 wisp.options.allow_private_ips = true;
 wisp.options.allow_loopback_ips = true;
 
 wispserver.on("upgrade", (req, socket, head) => {
-	wisp.routeRequest(req, socket, head);
+  wisp.routeRequest(req, socket, head);
 });
 
 wispserver.listen(Number(WISP_PORT));
 
 const server = await createServer({
-	configFile: "./packages/demo/vite.config.ts",
-	root: "./packages/demo",
-	server: {
-		host: true,
-		port: Number(DEMO_PORT),
-		strictPort: true,
-		allowedHosts: true,
-		proxy: {
-			[WISP_PROXY_PATH]: {
-				target: `ws://127.0.0.1:${WISP_PORT}`,
-				ws: true,
-				rewrite: (path) => path.replace(/^\/wisp\/?/, "/"),
-			},
-		},
-	},
+  configFile: "./packages/demo/vite.config.ts",
+  root: "./packages/demo",
+  server: {
+    host: true,
+    port: Number(DEMO_PORT),
+    strictPort: true,
+    allowedHosts: true,
+    proxy: {
+      [WISP_PROXY_PATH]: {
+        target: `ws://127.0.0.1:${WISP_PORT}`,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/wisp\/?/, "/"),
+      },
+    },
+  },
 });
 
 warnOnUrlEscape(server);
@@ -85,21 +85,38 @@ const note = (text: string) => chalk.hex("#CDB4DB")(text);
 const connector = chalk.hex("#8D99AE").dim("@");
 
 const lines = [
-	black()(`${highlight("SCRAMJET DEV SERVER")}`),
-	black()(
-		`${accent("demo")} ${connector} ${urlColor(
-			`http://localhost:${DEMO_PORT}/`
-		)}`
-	),
-	black()(
-		`${accent("wisp")} ${connector} ${urlColor(
-			process.env.VITE_WISP_URL ??
-				`same origin (http://localhost:${DEMO_PORT}${WISP_PROXY_PATH})`
-		)}`
-	),
-	black()(chalk.dim(`[${branch}] ${commit} scramjet/${version}`)),
+  black()(`${highlight("SCRAMJET DEV SERVER")}`),
+  black()(
+    `${accent("demo")} ${connector} ${urlColor(
+      `http://localhost:${DEMO_PORT}/`,
+    )}`,
+  ),
+  black()(
+    `${accent("wisp")} ${connector} ${urlColor(
+      process.env.VITE_WISP_URL ??
+        `same origin (http://localhost:${DEMO_PORT}${WISP_PROXY_PATH})`,
+    )}`,
+  ),
+  black()(chalk.dim(`[${branch}] ${commit} scramjet/${version}`)),
 ];
 
-runRspack(rspackConfig);
+// Building scramjet from source requires the rust rewriter
+// (pnpm rewriter:build -> packages/core/rewriter/wasm/out/wasm.js).
+// When it isn't built, rebuilding would overwrite the prebuilt dist with a
+// bundle that can't load the wasm rewriter (the browser then shows nothing),
+// so keep the published dist in that case.
+const REWRITER_GLUE = "./packages/core/rewriter/wasm/out/wasm.js";
+const canRebuild = existsSync(REWRITER_GLUE);
+
+if (canRebuild) {
+  runRspack(rspackConfig);
+} else {
+  stdout.write(
+    chalk.yellow(
+      `${chalk.bold("!")} rewriter not built (run \`pnpm rewriter:build\`) - ` +
+        "using prebuilt packages/*/dist instead of rebuilding.\n",
+    ),
+  );
+}
 
 printBanner(image, lines);
