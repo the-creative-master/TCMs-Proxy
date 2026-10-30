@@ -323,6 +323,119 @@ const RETIRED_DEFAULT_WISP_URLS: ReadonlyArray<string> = [
   "ws://wisp.mercurywork.shop/",
 ];
 
+export type WispPreset = {
+  id: string;
+  label: string;
+  url: string;
+  /** short "why you'd pick this" tag shown in the picker */
+  note: string;
+  /** shown on the row — limits the operator documents */
+  detail: string;
+};
+
+/**
+ * Public Wisp servers, gathered from the places that document them (the
+ * wisp-protocol repo, libcurl.js, Terbium, Anura, FreeWisp's own status page)
+ * plus community lists. They are run by different people with different limits,
+ * so none of them is guaranteed — that is exactly why the picker exists, and
+ * why the popover can test one before you commit to it.
+ */
+export const WISP_PRESETS: ReadonlyArray<WispPreset> = [
+  {
+    id: "webmc",
+    label: "WebMC",
+    url: "wss://wisp.webmc.fun/",
+    note: "Default",
+    detail: "No documented per-IP byte cap",
+  },
+  {
+    id: "freewisp",
+    label: "FreeWisp",
+    url: "wss://wisp.freewisp.org/",
+    note: "50 GB/day",
+    detail: "TCP only, ports 22/80/443/8080/8443",
+  },
+  {
+    id: "terbium",
+    label: "Terbium",
+    url: "wss://wisp.terbiumon.top/wisp/",
+    note: "Terbium OS",
+    detail: "The endpoint Terbium OS ships as its default",
+  },
+  {
+    id: "anura",
+    label: "Anura",
+    url: "wss://anura.pro/",
+    note: "AnuraOS",
+    detail: "Runs alongside the Anura proxy",
+  },
+  {
+    id: "mercury",
+    label: "Mercury Workshop",
+    url: "wss://wisp.mercurywork.shop/",
+    note: "100 kB/IP",
+    detail: "Demo server — throttles hard, mostly for trying things out",
+  },
+];
+
+/** the relay bundled with the dev server, when this page is being served by it */
+export function localWispUrl(): string {
+  if (typeof location === "undefined") return "";
+  const secure = location.protocol === "https:";
+  return `${secure ? "wss:" : "ws:"}//${location.host}/wisp/`;
+}
+
+export type WispProbeResult = {
+  ok: boolean;
+  /** milliseconds until the socket opened, or until it failed */
+  ms: number;
+  message: string;
+};
+
+/**
+ * Check a server from *this* browser, which is the only place the answer
+ * matters: a network can allow websockets to one host and block another. A
+ * bare websocket opening is enough of a signal to pick a relay — if the socket
+ * opens, the server is reachable and speaking wisp's transport.
+ */
+export function probeWispUrl(
+  url: string,
+  timeoutMs = 7000,
+): Promise<WispProbeResult> {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    let finished = false;
+    let socket: WebSocket | null = null;
+
+    const finish = (ok: boolean, message: string) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      try {
+        socket?.close();
+      } catch {}
+      resolve({ ok, ms: Date.now() - started, message });
+    };
+
+    const timer = setTimeout(
+      () => finish(false, "Timed out — the socket never opened."),
+      timeoutMs,
+    );
+
+    try {
+      socket = new WebSocket(url);
+    } catch {
+      finish(false, "That is not a valid WebSocket URL.");
+      return;
+    }
+
+    socket.onopen = () => finish(true, "Socket opened — this server answers.");
+    socket.onerror = () =>
+      finish(false, "Could not open a socket to that server.");
+    socket.onclose = () => finish(false, "The server closed the connection.");
+  });
+}
+
 function runtimeDefaultWispUrl() {
   const fromEnv = import.meta.env.VITE_WISP_URL as string | undefined;
   if (fromEnv) return fromEnv;

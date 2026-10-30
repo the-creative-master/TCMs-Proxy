@@ -8,11 +8,14 @@ import { cachePlugin, controller, getTransport } from "..";
 import {
   AVAILABLE_TRANSPORTS,
   LOGO_URL,
+  WISP_PRESETS,
   demoSettingsDefaults,
   demoSettingsStore,
   getSearchEngine,
   normalizeTransport,
+  localWispUrl,
   normalizeWispUrl,
+  probeWispUrl,
   resolveNavigationInput,
   type AvailableTransports,
 } from "../store";
@@ -168,11 +171,17 @@ const BrowserView: Component<
     transportInput: AvailableTransports;
     connStatus: string;
     connError: string;
+    probing: boolean;
+    probeStatus: string;
+    probeOk: boolean;
   }
 > = function (cx) {
   this.connOpen ??= false;
   this.connStatus ??= "";
   this.connError ??= "";
+  this.probing ??= false;
+  this.probeStatus ??= "";
+  this.probeOk ??= false;
 
   const openConnection = () => {
     this.connOpen = !this.connOpen;
@@ -181,7 +190,36 @@ const BrowserView: Component<
       this.transportInput = demoSettingsStore.transport;
       this.connStatus = "";
       this.connError = "";
+      this.probeStatus = "";
     }
+  };
+
+  const pickServer = (url: string) => {
+    this.wispInput = url;
+    this.connStatus = "";
+    this.connError = "";
+    this.probeStatus = "";
+  };
+
+  const testServer = async () => {
+    if (this.probing) return;
+    let candidate: string;
+    try {
+      candidate = normalizeWispUrl(this.wispInput);
+    } catch (error) {
+      this.probeOk = false;
+      this.probeStatus =
+        error instanceof Error ? error.message : "That URL is not valid.";
+      return;
+    }
+    this.probing = true;
+    this.probeStatus = "";
+    const result = await probeWispUrl(candidate);
+    this.probing = false;
+    this.probeOk = result.ok;
+    this.probeStatus = result.ok
+      ? `${result.ms} ms — ${result.message}`
+      : result.message;
   };
 
   const applyConnection = () => {
@@ -419,6 +457,34 @@ const BrowserView: Component<
                 <span class="material-symbols-outlined">close</span>
               </button>
             </div>
+            <div class="popover-servers">
+              {[
+                ...WISP_PRESETS,
+                {
+                  id: "local",
+                  label: "This machine",
+                  url: localWispUrl(),
+                  note: "Local",
+                  detail: "The relay bundled with the dev server",
+                },
+              ].map((preset) => (
+                <button
+                  type="button"
+                  class={use(this.wispInput).map((current) =>
+                    current === preset.url ? "server-row active" : "server-row",
+                  )}
+                  title={preset.detail}
+                  on:click={() => pickServer(preset.url)}
+                >
+                  <span class="server-dot"></span>
+                  <span class="server-text">
+                    <span class="server-name">{preset.label}</span>
+                    <span class="server-host">{prettyHost(preset.url)}</span>
+                  </span>
+                  <span class="server-note">{preset.note}</span>
+                </button>
+              ))}
+            </div>
             <label class="popover-field">
               <span>Wisp server</span>
               <input
@@ -447,9 +513,32 @@ const BrowserView: Component<
                 ))}
               </select>
             </label>
+            <div class="popover-test">
+              <button
+                type="button"
+                class="test-btn"
+                on:click={() => void testServer()}
+              >
+                {use(this.probing).map((busy) =>
+                  busy ? "Testing…" : "Test connection",
+                )}
+              </button>
+              {use(this.probeStatus).map((status) =>
+                status ? (
+                  <span
+                    class={use(this.probeOk).map((ok) =>
+                      ok ? "probe-result ok" : "probe-result bad",
+                    )}
+                  >
+                    {status}
+                  </span>
+                ) : null,
+              )}
+            </div>
             <p class="popover-note">
               Every proxied request leaves from the machine running this Wisp
-              server, not from your browser.
+              server, not from your browser — so pick one your network can
+              reach. Testing happens in this browser, not on the server.
             </p>
             {use(this.connError).andThen(
               <div class="popover-error">{use(this.connError)}</div>,
@@ -461,7 +550,7 @@ const BrowserView: Component<
               <button
                 class="ghost"
                 on:click={() => {
-                  this.wispInput = demoSettingsDefaults.wispUrl;
+                  pickServer(demoSettingsDefaults.wispUrl);
                   this.transportInput = demoSettingsDefaults.transport;
                 }}
               >
@@ -797,7 +886,7 @@ BrowserView.style = css`
     position: absolute;
     top: 56px;
     right: 0;
-    width: 320px;
+    width: 340px;
     z-index: 30;
     display: flex;
     flex-direction: column;
@@ -840,6 +929,116 @@ BrowserView.style = css`
     color: #e9ebf5;
     background: rgba(255, 255, 255, 0.08);
   }
+  .popover-servers {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 208px;
+    overflow: auto;
+    padding: 4px;
+    border-radius: 11px;
+    background: rgba(8, 10, 18, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .server-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #d5daea;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+  .server-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .server-row.active {
+    background: rgba(124, 92, 255, 0.18);
+  }
+  .server-dot {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+  }
+  .server-row.active .server-dot {
+    background: #7cf0b6;
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16);
+  }
+  .server-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+  }
+  .server-name {
+    font-size: 0.78rem;
+    font-weight: 560;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .server-host {
+    font-size: 0.66rem;
+    color: #7d859b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .server-note {
+    flex: none;
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    color: #a9b1c6;
+    background: rgba(255, 255, 255, 0.07);
+  }
+  .server-row.active .server-note {
+    color: #cfc6ff;
+    background: rgba(124, 92, 255, 0.26);
+  }
+
+  .popover-test {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .test-btn {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: #e9ebf5;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 0.74rem;
+    font-weight: 560;
+    cursor: pointer;
+  }
+  .test-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .probe-result {
+    font-size: 0.7rem;
+    line-height: 1.35;
+  }
+  .probe-result.ok {
+    color: #7cf0b6;
+  }
+  .probe-result.bad {
+    color: #ffb4b4;
+  }
+
   .popover-field {
     display: flex;
     flex-direction: column;
