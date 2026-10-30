@@ -105,7 +105,7 @@ export function navigateTo(url: string) {
   }
 }
 
-/** the scramjet prefix every proxied document lives under */
+/** every proxied document lives under this path prefix (set by the engine) */
 function isProxiedPath(pathname: string) {
   return pathname.startsWith("/~/sj/");
 }

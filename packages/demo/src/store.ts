@@ -442,6 +442,32 @@ function runtimeDefaultWispUrl() {
   return PUBLIC_WISP_URL;
 }
 
+const SETTINGS_IDENT = "tcm-proxy-settings";
+/** what this store used to be called, before the rename */
+const LEGACY_SETTINGS_IDENTS = ["scramjet-demo-settings"];
+
+/**
+ * Carry a saved record over to the current key so a rename does not look like a
+ * first visit (which would reset the Wisp server, transport and engine).
+ */
+function adoptLegacySettings() {
+  if (typeof localStorage === "undefined") return;
+  const currentKey = `dls-${SETTINGS_IDENT}`;
+  try {
+    if (localStorage.getItem(currentKey)) return;
+    for (const ident of LEGACY_SETTINGS_IDENTS) {
+      const legacy = localStorage.getItem(`dls-${ident}`);
+      if (!legacy) continue;
+      localStorage.setItem(currentKey, legacy);
+      return;
+    }
+  } catch {
+    // storage can be blocked; the store falls back to defaults either way
+  }
+}
+
+adoptLegacySettings();
+
 const DEFAULT_WISP_URL = runtimeDefaultWispUrl();
 const DEFAULT_TRANSPORT: AvailableTransports = "libcurl";
 const WISP_DEFAULT_REVISION = 3;
@@ -454,7 +480,7 @@ export const demoSettingsStore = createStore(
     wispRevision: WISP_DEFAULT_REVISION,
   },
   {
-    ident: "scramjet-demo-settings",
+    ident: SETTINGS_IDENT,
     backing: "localstorage",
     autosave: "auto",
   },
@@ -476,7 +502,7 @@ export const demoSettingsStore = createStore(
   try {
     const raw =
       typeof localStorage !== "undefined"
-        ? localStorage.getItem("dls-scramjet-demo-settings")
+        ? localStorage.getItem(`dls-${SETTINGS_IDENT}`)
         : null;
     stored = raw ? JSON.parse(raw) : null;
   } catch {
