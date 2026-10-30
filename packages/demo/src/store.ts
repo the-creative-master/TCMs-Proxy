@@ -130,15 +130,17 @@ function shortcut(id: string, name: string, url: string): Shortcut {
 export const DEFAULT_SHORTCUTS: ReadonlyArray<Shortcut> = [
   shortcut("youtube", "YouTube", "https://www.youtube.com"),
   shortcut("wikipedia", "Wikipedia", "https://www.wikipedia.org"),
-  shortcut("reddit", "Reddit", "https://www.reddit.com"),
-  shortcut("github", "GitHub", "https://github.com"),
-  shortcut("discord", "Discord", "https://discord.com/app"),
   shortcut("chatgpt", "ChatGPT", "https://chatgpt.com"),
+  shortcut("reddit", "Reddit", "https://www.reddit.com"),
+  shortcut("eaglercraft", "Eaglercraft", "https://eaglercraft.com"),
 ];
+
+const SHORTCUTS_REVISION = 3;
 
 export const shortcutsStore = createStore(
   {
     items: DEFAULT_SHORTCUTS.map((item) => ({ ...item })) as Shortcut[],
+    revision: SHORTCUTS_REVISION,
   },
   {
     ident: "tcm-shortcuts",
@@ -151,6 +153,50 @@ export const shortcutsStore = createStore(
 if (!Array.isArray(shortcutsStore.items)) {
   shortcutsStore.items = DEFAULT_SHORTCUTS.map((item) => ({ ...item }));
 }
+
+function readStoredRecord(ident: string): Record<string, unknown> | null {
+  try {
+    const raw =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem(`dls-${ident}`)
+        : null;
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Add any recommended shortcut a returning visitor is missing — once per
+ * revision. Anyone who deliberately removed YouTube keeps it removed, because
+ * the migration never runs twice against the same stored revision.
+ */
+function migrateShortcuts() {
+  const stored = readStoredRecord("tcm-shortcuts");
+  const seenRevision = stored?.revision === SHORTCUTS_REVISION;
+  if (!seenRevision) {
+    const items: Shortcut[] = Array.isArray(shortcutsStore.items)
+      ? [...shortcutsStore.items]
+      : [];
+    const bare = (host: string) => host.replace(/^www\./, "");
+    const known = new Set(
+      items.map((item) => bare(shortcutHost(item.url))).filter(Boolean),
+    );
+    const additions = DEFAULT_SHORTCUTS.filter((item) => {
+      const host = bare(shortcutHost(item.url));
+      return host ? !known.has(host) : false;
+    });
+    if (additions.length) {
+      shortcutsStore.items = [
+        ...items,
+        ...additions.map((item) => ({ ...item })),
+      ];
+    }
+  }
+  shortcutsStore.revision = SHORTCUTS_REVISION;
+}
+
+migrateShortcuts();
 
 function newShortcutId() {
   return `sc-${Date.now().toString(36)}-${Math.random()
@@ -229,6 +275,33 @@ export function monogram(name: string) {
   const trimmed = name.trim();
   return (trimmed ? trimmed[0] : "?").toUpperCase();
 }
+
+/** the hostname we hang a shortcut's favicon off, or "" if it isn't parseable */
+export function shortcutHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Where to try pulling a real site icon from. Both are plain <img> sources, so
+ * the browser fetches them directly — no proxying involved. The tile falls back
+ * to a monogram when every entry in this list fails.
+ */
+export function shortcutIconCandidates(url: string): string[] {
+  const host = shortcutHost(url);
+  if (!host) return [];
+  return [
+    `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`,
+    `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`,
+    `https://${host}/favicon.ico`,
+  ];
+}
+
+/** shared app mark, served from public/ */
+export const LOGO_URL = "./logo.svg";
 
 /* -------------------------------------------------------------------------- */
 /*                                  settings                                  */

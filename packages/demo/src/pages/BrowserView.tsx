@@ -7,6 +7,7 @@ import { Tap } from "@mercuryworkshop/scramjet";
 import { cachePlugin, controller, getTransport } from "..";
 import {
   AVAILABLE_TRANSPORTS,
+  LOGO_URL,
   demoSettingsDefaults,
   demoSettingsStore,
   getSearchEngine,
@@ -101,9 +102,44 @@ export function navigateTo(url: string) {
   }
 }
 
+/** the scramjet prefix every proxied document lives under */
+function isProxiedPath(pathname: string) {
+  return pathname.startsWith("/~/sj/");
+}
+
+function sameOriginUrl(href: string): URL | null {
+  try {
+    const parsed = new URL(href, location.href);
+    return parsed.origin === location.origin ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** pull the real destination out of `/?goto=<url>` */
+function gotoParam(href: string): string | null {
+  const parsed = sameOriginUrl(href);
+  const target = parsed?.searchParams.get("goto") ?? null;
+  return target && target.trim() ? target : null;
+}
+
+/** true when a URL would put the proxy inside its own viewport */
+function isSelfReferential(href: string) {
+  const parsed = sameOriginUrl(href);
+  if (!parsed) return false;
+  return !isProxiedPath(parsed.pathname);
+}
+
 export function navigateToInput(input: string) {
   const target = resolveNavigationInput(input, demoSettingsStore.searchEngine);
-  if (target) navigateTo(target);
+  if (!target) return;
+  if (isSelfReferential(target)) {
+    // never point the viewport back at ourselves — that is the proxy inside
+    // the proxy, which has no way to work
+    goHome();
+    return;
+  }
+  navigateTo(target);
 }
 
 export function goHome() {
@@ -181,6 +217,10 @@ const BrowserView: Component<
     await controller.wait();
 
     const urlWatcher = new UrlWatcherPlugin((url) => {
+      if (isSelfReferential(url)) {
+        recoverFromAppUrl(url);
+        return;
+      }
       browserState.url = url;
       browserState.liveUrl = url;
       if (/^https?:/i.test(url)) browserState.showHome = false;
@@ -216,9 +256,44 @@ const BrowserView: Component<
   };
 
   const submit = () => {
-    const value = this.omniboxEl?.value ?? browserState.url;
+    const value = this.omniboxEl?.value ?? "";
+    if (!value.trim()) {
+      goHome();
+      this.omniboxEl?.blur();
+      return;
+    }
     navigateToInput(value);
     this.omniboxEl?.blur();
+  };
+
+  /**
+   * Last line of defence against the viewport loading this app: if the frame
+   * ever ends up on one of our own URLs (service worker miss, an escaped link,
+   * a `?goto=` bounce) put it back on a proxied page instead of nesting.
+   */
+  const recoverFromAppUrl = (href: string) => {
+    const target = gotoParam(href);
+    if (target && !isSelfReferential(target)) {
+      navigateTo(target);
+      return;
+    }
+    goHome();
+    this.frameel?.setAttribute("src", BLANK_DOC);
+  };
+
+  const onFrameLoad = () => {
+    let href = "";
+    try {
+      href = this.frameel?.contentWindow?.location.href ?? "";
+    } catch {
+      // a genuine cross-origin page — exactly what we want to see
+      return;
+    }
+    if (!href || href === "about:blank" || href.startsWith("data:")) return;
+    const parsed = sameOriginUrl(href);
+    if (!parsed) return;
+    if (isProxiedPath(parsed.pathname)) return;
+    recoverFromAppUrl(href);
   };
 
   const engine = use(demoSettingsStore.searchEngine).map((id) =>
@@ -246,7 +321,13 @@ const BrowserView: Component<
             this.omniboxEl?.focus();
           }}
         >
-          <span class="brand-mark">TCM</span>
+          <img
+            class="brand-mark"
+            src={LOGO_URL}
+            alt="TCM's Proxy"
+            width="30"
+            height="30"
+          />
         </button>
 
         <div class="nav">
@@ -395,7 +476,11 @@ const BrowserView: Component<
       </header>
 
       <main class="viewport">
-        <iframe this={use(this.frameel)} class="site-frame"></iframe>
+        <iframe
+          this={use(this.frameel)}
+          class="site-frame"
+          on:load={onFrameLoad}
+        ></iframe>
 
         {use(browserState.netError).map((error) =>
           error ? (
@@ -560,16 +645,18 @@ BrowserView.style = css`
     cursor: pointer;
     display: grid;
     place-items: center;
-    background: linear-gradient(135deg, #7c5cff, #22d3ee);
-    box-shadow:
-      0 10px 24px rgba(96, 92, 255, 0.34),
-      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    background: transparent;
+    transition: transform 0.14s ease;
+  }
+  .brand:hover {
+    transform: translateY(-1px);
   }
   .brand-mark {
-    font-size: 0.56rem;
-    font-weight: 800;
-    letter-spacing: 0.05em;
-    color: #fff;
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    display: block;
+    filter: drop-shadow(0 8px 18px rgba(96, 92, 255, 0.4));
   }
   .nav {
     flex: none;

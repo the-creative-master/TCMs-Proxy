@@ -9,6 +9,38 @@ import { demoSettingsStore } from "./store";
 
 let app = document.getElementById("app")!;
 
+/**
+ * Is this window the proxy's own iframe? If the app somehow ends up loaded
+ * inside its own viewport (a service worker miss, an escaped link, a `?goto=`
+ * bounce), booting a second proxy there is pointless — it would register the
+ * service worker again and render the app inside the app. Same-origin parents
+ * only, so a legitimately embedded cross-origin copy still works.
+ */
+function isSelfEmbedded() {
+	if (window.top === window.self) return false;
+	try {
+		return window.parent.location.origin === location.origin;
+	} catch {
+		return false;
+	}
+}
+
+function abandonSelfEmbed(): void {
+	try {
+		window.parent.postMessage(
+			{ type: "tcm:nested", href: location.href },
+			location.origin
+		);
+	} catch {}
+	app.replaceWith(
+		Object.assign(document.createElement("div"), {
+			textContent: "This copy of TCM's Proxy is inside its own viewport.",
+			style:
+				"padding:24px;font:14px system-ui,sans-serif;color:#767f96;background:#07080e;height:100vh;box-sizing:border-box",
+		})
+	);
+}
+
 let controller: InstanceType<typeof Controller>;
 const cachePlugin = new HttpCachePlugin();
 
@@ -162,5 +194,9 @@ async function mount() {
 	}
 }
 
-init().then(() => mount());
+if (isSelfEmbedded()) {
+	abandonSelfEmbed();
+} else {
+	init().then(() => mount());
+}
 export { controller, cachePlugin };

@@ -1,6 +1,7 @@
 import { css, type Component } from "dreamland/core";
 import ShortcutEditor from "../components/ShortcutEditor";
 import {
+  LOGO_URL,
   SEARCH_ENGINES,
   addShortcut,
   demoSettingsStore,
@@ -8,13 +9,12 @@ import {
   monogram,
   removeShortcut,
   resolveNavigationInput,
+  shortcutIconCandidates,
   shortcutTileColor,
   shortcutsStore,
   updateShortcut,
   type Shortcut,
 } from "../store";
-
-const ENGINE_PICKER_ID = "newtab-engine-picker";
 
 const NewTab: Component<
   {
@@ -23,21 +23,31 @@ const NewTab: Component<
   {},
   {
     searchEl: HTMLInputElement;
-    engineMenu: boolean;
     editorTarget: string;
   }
 > = function (cx) {
-  this.engineMenu ??= false;
   this.editorTarget ??= "";
-
-  const toggleEngineMenu = () => {
-    this.engineMenu = !this.engineMenu;
-  };
 
   const pickEngine = (id: (typeof SEARCH_ENGINES)[number]["id"]) => {
     demoSettingsStore.searchEngine = id;
-    this.engineMenu = false;
     this.searchEl?.focus();
+  };
+
+  /**
+   * Walk the icon candidate list before giving up and showing the monogram, so
+   * a shortcut always has a face even when a site ships no favicon.
+   */
+  const onIconError = (event: Event) => {
+    const img = event.currentTarget as HTMLImageElement | null;
+    if (!img) return;
+    const chain = (img.dataset.chain ?? "").split("|").filter(Boolean);
+    const step = Number(img.dataset.step ?? "0") + 1;
+    if (step < chain.length) {
+      img.dataset.step = String(step);
+      img.src = chain[step];
+      return;
+    }
+    img.classList.add("failed");
   };
 
   const submitSearch = () => {
@@ -51,7 +61,6 @@ const NewTab: Component<
   };
 
   const openEditor = (target: string) => {
-    this.engineMenu = false;
     this.editorTarget = target;
   };
 
@@ -94,11 +103,11 @@ const NewTab: Component<
     <div class="newtab">
       <div class="newtab-inner">
         <div class="hero">
-          <div class="hero-mark">TCM</div>
+          <img class="hero-logo" src={LOGO_URL} alt="" width="58" height="58" />
           <h1 class="hero-title">
             <span class="hero-title-main">Where to?</span>
             <span class="hero-title-sub">
-              Search or type a URL. Everything is proxied.
+              Search or type a URL — every request is tunnelled through Wisp
             </span>
           </h1>
         </div>
@@ -110,62 +119,16 @@ const NewTab: Component<
             submitSearch();
           }}
         >
-          <div
-            class={use(this.engineMenu).map(
-              (open) => `engine-picker ${open ? "open" : ""}`,
+          <span
+            class={use(demoSettingsStore.searchEngine).map(
+              (id) => `engine-badge search-glyph engine-${id}`,
             )}
-            id={ENGINE_PICKER_ID}
+            title={engineLabel.map((label) => `Searching with ${label}`)}
           >
-            <button
-              type="button"
-              class="engine-trigger"
-              title="Change search engine"
-              on:click={(e: MouseEvent) => {
-                e.preventDefault();
-                toggleEngineMenu();
-              }}
-            >
-              <span
-                class={use(demoSettingsStore.searchEngine).map(
-                  (id) => `engine-badge engine-${id}`,
-                )}
-              >
-                {use(demoSettingsStore.searchEngine).map(
-                  (id) => getSearchEngine(id).glyph,
-                )}
-              </span>
-              <span class="engine-label">{engineLabel}</span>
-              <span class="engine-chevron">▾</span>
-            </button>
-
-            {use(this.engineMenu).andThen(
-              <div class="engine-menu">
-                {SEARCH_ENGINES.map((engine) => (
-                  <button
-                    type="button"
-                    class={use(demoSettingsStore.searchEngine).map((id) =>
-                      id === engine.id
-                        ? "engine-option active"
-                        : "engine-option",
-                    )}
-                    on:click={(e: MouseEvent) => {
-                      e.preventDefault();
-                      pickEngine(engine.id);
-                    }}
-                  >
-                    <span class={`engine-badge small engine-${engine.id}`}>
-                      {engine.glyph}
-                    </span>
-                    <span class="engine-option-text">
-                      <span class="engine-option-name">{engine.label}</span>
-                      <span class="engine-option-hint">{engine.hint}</span>
-                    </span>
-                    <span class="engine-check">✓</span>
-                  </button>
-                ))}
-              </div>,
+            {use(demoSettingsStore.searchEngine).map(
+              (id) => getSearchEngine(id).glyph,
             )}
-          </div>
+          </span>
 
           <input
             class="search-input"
@@ -183,20 +146,23 @@ const NewTab: Component<
           </button>
         </form>
 
-        <div class="engine-chips">
+        <div class="engine-row" role="group" aria-label="Search engine">
           {SEARCH_ENGINES.map((engine) => (
             <button
               type="button"
               class={use(demoSettingsStore.searchEngine).map((id) =>
-                id === engine.id ? "chip active" : "chip",
+                id === engine.id ? "engine-btn active" : "engine-btn",
               )}
+              title={`Search with ${engine.label}`}
               on:click={(e: MouseEvent) => {
                 e.preventDefault();
-                demoSettingsStore.searchEngine = engine.id;
+                pickEngine(engine.id);
               }}
             >
-              <span class={`chip-dot engine-${engine.id}`}></span>
-              {engine.label}
+              <span class={`engine-badge small engine-${engine.id}`}>
+                {engine.glyph}
+              </span>
+              <span class="engine-btn-label">{engine.label}</span>
             </button>
           ))}
         </div>
@@ -221,11 +187,38 @@ const NewTab: Component<
                 title={item.url}
                 on:click={() => this.onNavigate?.(item.url)}
               >
-                <div
-                  class="tile-art"
-                  style={{ background: shortcutTileColor(item.id) }}
-                >
-                  {monogram(item.name)}
+                <div class="tile-art">
+                  {(() => {
+                    const icons = shortcutIconCandidates(item.url);
+                    if (!icons.length) {
+                      return (
+                        <span
+                          class="tile-fallback shown"
+                          style={{ background: shortcutTileColor(item.id) }}
+                        >
+                          {monogram(item.name)}
+                        </span>
+                      );
+                    }
+                    return [
+                      <img
+                        class="tile-icon"
+                        src={icons[0]}
+                        data-chain={icons.join("|")}
+                        data-step="0"
+                        alt=""
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                        on:error={onIconError}
+                      />,
+                      <span
+                        class="tile-fallback"
+                        style={{ background: shortcutTileColor(item.id) }}
+                      >
+                        {monogram(item.name)}
+                      </span>,
+                    ];
+                  })()}
                 </div>
                 <div class="tile-name">{item.name}</div>
                 <button
@@ -334,20 +327,11 @@ NewTab.style = css`
     margin-bottom: 6px;
     text-align: center;
   }
-  .hero-mark {
-    width: 46px;
-    height: 46px;
-    border-radius: 15px;
-    display: grid;
-    place-items: center;
-    font-size: 0.78rem;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    color: #fff;
-    background: linear-gradient(135deg, #7c5cff, #22d3ee);
-    box-shadow:
-      0 12px 30px rgba(96, 92, 255, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  .hero-logo {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+    filter: drop-shadow(0 14px 30px rgba(96, 92, 255, 0.4));
   }
   .hero-title {
     display: flex;
@@ -392,129 +376,12 @@ NewTab.style = css`
       0 20px 50px rgba(0, 0, 0, 0.45),
       0 0 0 4px rgba(124, 92, 255, 0.15);
   }
-  .engine-picker {
-    position: relative;
+  .search-glyph {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    font-size: 0.72rem;
     flex: none;
-  }
-  .engine-trigger {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 7px 9px;
-    border-radius: 12px;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.05);
-    color: #dfe3f2;
-    font: inherit;
-    font-size: 0.8rem;
-    font-weight: 560;
-    cursor: pointer;
-    transition: background 0.14s ease;
-  }
-  .engine-trigger:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  .engine-picker.open .engine-trigger {
-    background: rgba(124, 92, 255, 0.2);
-    border-color: rgba(124, 92, 255, 0.4);
-  }
-  .engine-badge {
-    width: 19px;
-    height: 19px;
-    border-radius: 7px;
-    display: grid;
-    place-items: center;
-    font-size: 0.68rem;
-    font-weight: 800;
-    color: #fff;
-    flex: none;
-    text-transform: none;
-  }
-  .engine-badge.small {
-    width: 18px;
-    height: 18px;
-    border-radius: 6px;
-    font-size: 0.64rem;
-  }
-  .engine-google {
-    background: #4285f4;
-  }
-  .engine-bing {
-    background: #00a4ef;
-  }
-  .engine-duckduckgo {
-    background: #de5833;
-  }
-  .engine-brave {
-    background: #fb542b;
-  }
-  .engine-chevron {
-    font-size: 0.6rem;
-    color: #9aa2b8;
-  }
-  .engine-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    z-index: 20;
-    width: 232px;
-    padding: 6px;
-    border-radius: 14px;
-    background: rgba(18, 21, 34, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    animation: nt-menu 0.12s ease-out;
-  }
-  @keyframes nt-menu {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  .engine-option {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 8px 9px;
-    border: 0;
-    border-radius: 10px;
-    background: transparent;
-    color: #e4e7f3;
-    font: inherit;
-    cursor: pointer;
-    text-align: left;
-  }
-  .engine-option:hover {
-    background: rgba(255, 255, 255, 0.07);
-  }
-  .engine-option-text {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.2;
-    flex: 1;
-  }
-  .engine-option-name {
-    font-size: 0.82rem;
-    font-weight: 560;
-  }
-  .engine-option-hint {
-    font-size: 0.7rem;
-    color: #868ea4;
-  }
-  .engine-check {
-    opacity: 0;
-    color: #9f8cff;
-    font-size: 0.78rem;
-  }
-  .engine-option.active .engine-check {
-    opacity: 1;
   }
   .search-input {
     flex: 1;
@@ -555,43 +422,46 @@ NewTab.style = css`
     color: #fff;
   }
 
-  .engine-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-    justify-content: center;
+  .engine-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
   }
-  .chip {
+  .engine-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 11px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 10px;
+    border-radius: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.03);
     color: #a9b1c6;
     font: inherit;
-    font-size: 0.75rem;
-    font-weight: 540;
+    font-size: 0.78rem;
+    font-weight: 560;
     cursor: pointer;
     transition:
       background 0.14s ease,
       color 0.14s ease,
-      border-color 0.14s ease;
+      border-color 0.14s ease,
+      transform 0.14s ease;
   }
-  .chip:hover {
+  .engine-btn:hover {
     background: rgba(255, 255, 255, 0.08);
     color: #e6e9f5;
+    transform: translateY(-1px);
   }
-  .chip.active {
+  .engine-btn.active {
     color: #fff;
     background: rgba(124, 92, 255, 0.18);
-    border-color: rgba(124, 92, 255, 0.45);
+    border-color: rgba(124, 92, 255, 0.5);
+    box-shadow: 0 8px 22px rgba(96, 92, 255, 0.22);
   }
-  .chip-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
+  .engine-btn-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .shortcuts-head {
@@ -659,15 +529,42 @@ NewTab.style = css`
     border-color: rgba(255, 255, 255, 0.14);
   }
   .tile-art {
-    width: 40px;
-    height: 40px;
-    border-radius: 13px;
+    position: relative;
+    width: 44px;
+    height: 44px;
     display: grid;
     place-items: center;
-    font-size: 1.02rem;
+  }
+  .tile-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    object-fit: contain;
+    padding: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+    transition: transform 0.14s ease;
+  }
+  .tile:hover .tile-icon {
+    transform: scale(1.06);
+  }
+  .tile-icon.failed {
+    display: none;
+  }
+  .tile-fallback {
+    position: absolute;
+    inset: 2px;
+    border-radius: 13px;
+    display: none;
+    place-items: center;
+    font-size: 1rem;
     font-weight: 750;
     color: #fff;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
+  .tile-fallback.shown,
+  .tile-icon.failed + .tile-fallback {
+    display: grid;
   }
   .tile-name {
     font-size: 0.74rem;
@@ -745,9 +642,8 @@ NewTab.style = css`
   }
 
   @media (max-width: 560px) {
-    .engine-label,
-    .engine-chevron {
-      display: none;
+    .engine-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .newtab-inner {
       width: calc(100% - 24px);

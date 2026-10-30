@@ -5,7 +5,7 @@ import { stdout } from "node:process";
 import { execSync } from "node:child_process";
 import http from "node:http";
 import chalk from "chalk";
-import { createServer } from "vite";
+import { createServer, type Connect } from "vite";
 //@ts-expect-error no typedefs
 import { server as wisp } from "@mercuryworkshop/wisp-js/server";
 import {
@@ -65,6 +65,19 @@ const WISP_PORT = process.env.WISP_PORT || 4142;
 // that the browser can reach it on the same origin (needed when the dev server
 // is opened through a tunnel / preview url instead of localhost).
 const WISP_PROXY_PATH = "/wisp/";
+
+const escapeForPage = (value: string) =>
+  value.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[char] ?? char,
+  );
 const DEFAULT_WISP_URL = "wss://wisp.mercurywork.shop/";
 
 if (process.env.VITE_WISP_URL) {
@@ -102,6 +115,55 @@ const server = await createServer({
         rewrite: (path) => path.replace(/^\/wisp\/?/, "/"),
       },
     },
+  },
+});
+
+/**
+ * A proxied document always comes back through the service worker, so a request
+ * for the scramjet prefix that reaches this server means the worker missed it.
+ * Vite's SPA fallback would then answer with index.html and the demo would load
+ * inside its own viewport — so answer with a real error instead of nesting.
+ */
+server.middlewares.stack.unshift({
+  route: "",
+  handle: (
+    req: Connect.IncomingMessage,
+    res: http.ServerResponse,
+    next: Connect.NextFunction,
+  ) => {
+    const url = (req.url ?? "").split("?")[0];
+    if (!url.startsWith("/~/sj/")) {
+      next();
+      return;
+    }
+    res.statusCode = 503;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(
+      `<!doctype html><meta charset="utf-8"><title>Proxied request missed the service worker</title>
+     <meta name="tcm-proxy-miss" content="1">
+     <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#07080e;color:#e9ebf5;font:15px/1.6 system-ui,sans-serif">
+       <div style="max-width:520px;padding:28px">
+         <div style="font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:#ff8f8f;margin-bottom:10px">Proxy miss</div>
+         <h1 style="font-size:1.2rem;margin:0 0 10px">This request never reached the service worker</h1>
+         <p style="color:#99a1b8;margin:0 0 14px">Scramjet prefixes proxied documents with <code>${escapeForPage(url)}</code>. Seeing this page means the worker was not controlling the request yet — most of the time a reload is all it takes.</p>
+         <button onclick="location.reload()" style="border:0;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;color:#fff;cursor:pointer;background:linear-gradient(135deg,#7c5cff,#4f8bff)">Reload</button>
+       </div>
+       <script>
+         // a miss is usually the worker still claiming the frame: retry twice
+         try {
+           var key = "tcm-proxy-miss:${escapeForPage(url).replace(/[^a-zA-Z0-9._~-]/g, "")}";
+           var tries = Number(sessionStorage.getItem(key) || 0);
+           if (tries < 2) {
+             sessionStorage.setItem(key, String(tries + 1));
+             setTimeout(function () { location.reload(); }, 400);
+           } else {
+             sessionStorage.removeItem(key);
+           }
+         } catch (e) {}
+       </script>
+     </body>`,
+    );
   },
 });
 
