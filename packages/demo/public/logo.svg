@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="TCM's Proxy">
+  <defs>
+    <linearGradient id="tcmBg" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8E5CFF" />
+      <stop offset=".52" stop-color="#5B7DFF" />
+      <stop offset="1" stop-color="#1FD3E8" />
+    </linearGradient>
+    <linearGradient id="tcmSheen" x1="32" y1="2" x2="32" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".32" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#tcmBg)" />
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#tcmSheen)" />
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="17.25" fill="none" stroke="#ffffff" stroke-opacity=".18" stroke-width="1.5" />
+  <path d="M14 20.5h36" fill="none" stroke="#ffffff" stroke-width="9.5" stroke-linecap="round" />
+  <path d="M32 22v24" fill="none" stroke="#ffffff" stroke-width="9.5" stroke-linecap="round" />
+  <circle cx="45" cy="47" r="3.2" fill="#bff3ff" />
+</svg>

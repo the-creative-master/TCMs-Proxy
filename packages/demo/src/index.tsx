@@ -9,6 +9,38 @@ import { demoSettingsStore } from "./store";
 
 let app = document.getElementById("app")!;
 
+/**
+ * Is this window the proxy's own iframe? If the app somehow ends up loaded
+ * inside its own viewport (a service worker miss, an escaped link, a `?goto=`
+ * bounce), booting a second proxy there is pointless — it would register the
+ * service worker again and render the app inside the app. Same-origin parents
+ * only, so a legitimately embedded cross-origin copy still works.
+ */
+function isSelfEmbedded() {
+	if (window.top === window.self) return false;
+	try {
+		return window.parent.location.origin === location.origin;
+	} catch {
+		return false;
+	}
+}
+
+function abandonSelfEmbed(): void {
+	try {
+		window.parent.postMessage(
+			{ type: "tcm:nested", href: location.href },
+			location.origin
+		);
+	} catch {}
+	app.replaceWith(
+		Object.assign(document.createElement("div"), {
+			textContent: "This copy of TCM's Proxy is inside its own viewport.",
+			style:
+				"padding:24px;font:14px system-ui,sans-serif;color:#767f96;background:#07080e;height:100vh;box-sizing:border-box",
+		})
+	);
+}
+
 let controller: InstanceType<typeof Controller>;
 const cachePlugin = new HttpCachePlugin();
 
@@ -37,11 +69,25 @@ async function waitForControllerOrReady(timeoutMs = 10000): Promise<void> {
 		} as any);
 	});
 	const timeout = new Promise<void>((resolve) =>
-		setTimeout(resolve, timeoutMs)
+		setTimeout(resolve, timeoutMs),
 	);
 
 	// Wait for whichever happens first; on timeout we continue to avoid blocking the UI.
 	await Promise.race([ready, controllerChanged, timeout]);
+}
+
+function escapeHtml(value: string) {
+	return value.replace(
+		/[&<>"']/g,
+		(char) =>
+			({
+				"&": "&amp;",
+				"<": "&lt;",
+				">": "&gt;",
+				'"': "&quot;",
+				"'": "&#39;",
+			})[char] ?? char,
+	);
 }
 
 async function init() {
@@ -52,6 +98,16 @@ async function init() {
 	interstitial.showModal();
 
 	try {
+		if (!navigator.serviceWorker) {
+			throw new Error(
+				"Service workers are unavailable in this context. If you are viewing this inside an embedded preview, open it in a new browser tab.",
+			);
+		}
+		if (!window.isSecureContext) {
+			throw new Error(
+				"Service workers need a secure context (https or localhost). Open the demo over https or on localhost.",
+			);
+		}
 		const registration = await navigator.serviceWorker.register("./sw.js");
 
 		// Non-blocking progress updates on state transitions.
@@ -108,8 +164,17 @@ async function init() {
 		try {
 			interstitial.close();
 		} catch {}
-		app.innerText =
-			"Failed to register service worker. Check console for details.";
+		app.innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;padding:32px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#07080e;color:#e9ebf5;box-sizing:border-box">
+				<div style="max-width:560px">
+					<div style="font-size:0.7rem;letter-spacing:0.16em;text-transform:uppercase;color:#ff8f8f;margin-bottom:10px">Startup error</div>
+					<h1 style="font-size:1.35rem;margin:0 0 10px;letter-spacing:-0.02em">Could not start the proxy</h1>
+					<p style="color:#99a1b8;line-height:1.6;font-size:0.88rem;margin:0 0 8px">${escapeHtml(
+						e instanceof Error ? e.message : String(e),
+					)}</p>
+					<p style="color:#7d859b;line-height:1.6;font-size:0.8rem;margin:0 0 14px">Service worker registration or the controller handshake failed. Scramjet routes every request through a service worker, so it cannot run without one. Check the console for details, then reload. If this page is embedded in a preview frame, open it in a new tab.</p>
+					<button onclick="location.reload()" style="border:0;border-radius:10px;padding:9px 14px;font:inherit;font-size:0.82rem;font-weight:600;color:#fff;cursor:pointer;background:linear-gradient(135deg,#7c5cff,#4f8bff)">Reload</button>
+				</div>
+			</div>`;
 	}
 }
 
@@ -121,13 +186,17 @@ async function mount() {
 		let err = e as any;
 		app.replaceWith(
 			document.createTextNode(
-				`Error mounting: ${"message" in err ? err.message : err}`
-			)
+				`Error mounting: ${"message" in err ? err.message : err}`,
+			),
 		);
 		console.error(err);
 		throw e;
 	}
 }
 
-init().then(() => mount());
+if (isSelfEmbedded()) {
+	abandonSelfEmbed();
+} else {
+	init().then(() => mount());
+}
 export { controller, cachePlugin };
